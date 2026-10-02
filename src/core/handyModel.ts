@@ -42,6 +42,7 @@ export type NotificationActionRow = {
 };
 
 export const ACTION_PRESS_PREFIX = 'handy-action:';
+export const PRESET_PRESS_PREFIX = 'handy-preset-press:';
 
 export function defaultHandyState(): HandyState {
   return { presets: [] };
@@ -167,6 +168,14 @@ export function actionPressId(actionId: string): string {
 
 export function actionIdFromPressId(pressId: string): string | undefined {
   return pressId.startsWith(ACTION_PRESS_PREFIX) ? pressId.slice(ACTION_PRESS_PREFIX.length) : undefined;
+}
+
+export function presetPressId(presetId: string): string {
+  return `${PRESET_PRESS_PREFIX}${presetId}`;
+}
+
+export function presetIdFromPressId(pressId: string): string | undefined {
+  return pressId.startsWith(PRESET_PRESS_PREFIX) ? pressId.slice(PRESET_PRESS_PREFIX.length) : undefined;
 }
 
 export function notificationBodyForPreset(preset: HandyPreset): string {

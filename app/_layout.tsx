@@ -9,7 +9,7 @@ import {
   configureNotificationSurface,
   consumeInitialNotification,
   registerNotificationEvents,
-  setNotificationActionHandler,
+  setNotificationPressHandler,
 } from '@/src/core/handyNotifications';
 import { HandyStateProvider } from '@/src/hooks/HandyStateProvider';
 
@@ -54,9 +54,13 @@ function RootLayoutNav() {
   const router = useRouter();
 
   useEffect(() => {
-    setNotificationActionHandler((action) => {
-      if (action.payload.type === 'qr') {
-        router.push({ pathname: '/qr', params: { title: action.name, value: action.payload.value } });
+    setNotificationPressHandler((target) => {
+      if (target.type === 'preset') {
+        router.push({ pathname: '/preset-actions', params: { presetId: target.presetId } });
+        return;
+      }
+      if (target.action.payload.type === 'qr') {
+        router.push({ pathname: '/qr', params: { title: target.action.name, value: target.action.payload.value } });
       }
     });
 
@@ -71,6 +75,7 @@ function RootLayoutNav() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="qr" options={{ presentation: 'modal', title: 'QR Code' }} />
+          <Stack.Screen name="preset-actions" options={{ presentation: 'modal', title: 'Preset Actions' }} />
         </Stack>
       </HandyStateProvider>
     </ThemeProvider>

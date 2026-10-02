@@ -12,6 +12,8 @@ import {
   notificationBodyForPreset,
   notificationIdForPreset,
   notificationRowsData,
+  presetIdFromPressId,
+  presetPressId,
   validateHandyState,
   type HandyPreset,
   type HandyState,
@@ -115,7 +117,10 @@ test('notification metadata builds real action press ids instead of body text co
   assert.equal(notificationBodyForPreset(preset), 'Long-press or expand for 2 actions.');
   assert.equal(actionPressId('linkedin-one'), 'handy-action:linkedin-one');
   assert.equal(actionIdFromPressId('handy-action:linkedin-two'), 'linkedin-two');
+  assert.equal(presetPressId('conference'), 'handy-preset-press:conference');
+  assert.equal(presetIdFromPressId('handy-preset-press:conference'), 'conference');
   assert.equal(actionIdFromPressId('open-app'), undefined);
+  assert.equal(presetIdFromPressId('open-app'), undefined);
 
   const action = actionFromNotificationRowsData('linkedin-two', notificationRowsData(preset));
   assert.deepEqual(action, {
