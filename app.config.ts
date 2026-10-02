@@ -64,6 +64,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           backgroundColor: '#ffffff',
         },
       ],
+      [
+        'expo-widgets',
+        {
+          frequentUpdates: true,
+        },
+      ],
     ],
     experiments: {
       typedRoutes: true,

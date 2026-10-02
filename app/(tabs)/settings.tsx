@@ -54,7 +54,7 @@ export default function SettingsScreen() {
           </Pressable>
         </View>
         <Pressable style={styles.darkButton} onPress={refreshNotifications}>
-          <Text style={styles.darkButtonText}>Rebuild local notifications</Text>
+          <Text style={styles.darkButtonText}>Rebuild lock-screen surfaces</Text>
         </Pressable>
       </View>
 

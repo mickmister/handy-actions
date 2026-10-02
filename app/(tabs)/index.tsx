@@ -26,7 +26,7 @@ export default function PresetsScreen() {
         <Text style={styles.eyebrow}>Handy Actions</Text>
         <Text style={styles.title}>Lock-screen command panels</Text>
         <Text style={styles.copy}>
-          Enable presets to keep their actions visible as local notifications. No server, no account, no push token.
+          Enable presets to keep their actions visible as local notifications and iOS Live Activities. No server, no account, no push token.
         </Text>
       </View>
 
@@ -34,7 +34,7 @@ export default function PresetsScreen() {
         <Text style={styles.statusTitle}>{enabledCount} enabled</Text>
         <Text style={styles.statusCopy}>{handy.message}</Text>
         <Pressable style={styles.primaryButton} onPress={refreshNotifications}>
-          <Text style={styles.primaryButtonText}>Refresh notifications</Text>
+          <Text style={styles.primaryButtonText}>Refresh lock screen</Text>
         </Pressable>
       </View>
 

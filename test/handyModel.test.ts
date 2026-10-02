@@ -9,6 +9,7 @@ import {
   defaultHandyState,
   exportHandyState,
   importHandyState,
+  liveActivityPropsForPreset,
   notificationBodyForPreset,
   notificationIdForPreset,
   notificationRowsData,
@@ -22,6 +23,31 @@ import {
 test('default state starts local and empty', () => {
   const state = defaultHandyState();
   assert.deepEqual(state, { presets: [] });
+});
+
+test('live activity props summarize the preset without app runtime state', () => {
+  const preset: HandyPreset = {
+    id: 'conference',
+    name: 'Social/Conference',
+    enabled: true,
+    actions: [
+      { id: 'a1', name: 'My LinkTree', payload: { type: 'qr', value: 'https://example.test/linktree' } },
+      { id: 'a2', name: 'My LinkedIn', payload: { type: 'qr', value: 'https://example.test/linkedin' } },
+      { id: 'a3', name: 'My website', payload: { type: 'qr', value: 'https://example.test' } },
+      { id: 'a4', name: 'Landing page', payload: { type: 'qr', value: 'https://example.test/app' } },
+    ],
+  };
+
+  assert.deepEqual(liveActivityPropsForPreset(preset, '2026-10-02T20:00:00.000Z', 'handyactions://preset-actions?presetId=conference'), {
+    presetId: 'conference',
+    presetName: 'Social/Conference',
+    actionCount: 4,
+    firstAction: 'My LinkTree',
+    secondAction: 'My LinkedIn',
+    thirdAction: 'My website',
+    updatedAt: '2026-10-02T20:00:00.000Z',
+    openUrl: 'handyactions://preset-actions?presetId=conference',
+  });
 });
 
 test('validates typed action payloads', () => {

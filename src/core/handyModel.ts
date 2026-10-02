@@ -41,6 +41,17 @@ export type NotificationActionRow = {
   payload: HandyActionPayload;
 };
 
+export type HandyActionsLiveActivityProps = {
+  presetId: string;
+  presetName: string;
+  actionCount: number;
+  firstAction: string;
+  secondAction: string;
+  thirdAction: string;
+  updatedAt: string;
+  openUrl: string;
+};
+
 export const ACTION_PRESS_PREFIX = 'handy-action:';
 export const PRESET_PRESS_PREFIX = 'handy-preset-press:';
 
@@ -186,6 +197,24 @@ export function notificationBodyForPreset(preset: HandyPreset): string {
 
 export function notificationRowsData(preset: HandyPreset): string {
   return JSON.stringify(actionNotificationRows(preset));
+}
+
+export function liveActivityPropsForPreset(
+  preset: HandyPreset,
+  updatedAt = new Date().toISOString(),
+  openUrl = '',
+): HandyActionsLiveActivityProps {
+  const rows = actionNotificationRows(preset);
+  return {
+    presetId: preset.id,
+    presetName: preset.name,
+    actionCount: preset.actions.length,
+    firstAction: rows[0]?.title ?? '',
+    secondAction: rows[1]?.title ?? '',
+    thirdAction: rows[2]?.title ?? '',
+    updatedAt,
+    openUrl,
+  };
 }
 
 export function actionFromNotificationRowsData(actionId: string, rawActions: unknown): HandyAction | undefined {

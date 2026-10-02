@@ -25,6 +25,7 @@ import {
   type HandyState,
 } from './handyModel';
 import { loadHandyState } from './handyStore';
+import { syncPresetLiveActivities } from './handyLiveActivities';
 
 const CHANNEL_ID = 'handy-actions';
 
@@ -140,7 +141,11 @@ export async function syncPresetNotifications(state: HandyState): Promise<string
     });
   }
 
-  return presets.length === 1 ? 'Showing 1 enabled preset notification.' : `Showing ${presets.length} enabled preset notifications.`;
+  const liveActivitiesSynced = await syncLiveActivitiesWithoutBreakingNotifications(state);
+
+  const notificationMessage =
+    presets.length === 1 ? 'Showing 1 enabled preset notification.' : `Showing ${presets.length} enabled preset notifications.`;
+  return liveActivitiesSynced ? `${notificationMessage} iOS Live Activities refreshed.` : notificationMessage;
 }
 
 export function registerNotificationEvents(): () => void {
@@ -232,6 +237,16 @@ async function syncStoredPresetNotifications(): Promise<void> {
     await syncPresetNotifications(await loadHandyState());
   } catch {
     await syncPresetNotifications(currentState);
+  }
+}
+
+async function syncLiveActivitiesWithoutBreakingNotifications(state: HandyState): Promise<boolean> {
+  try {
+    await syncPresetLiveActivities(state);
+    return Platform.OS === 'ios';
+  } catch {
+    // Live Activities are an iOS enhancement; Notifee notifications are still the fallback command panel.
+    return false;
   }
 }
 
