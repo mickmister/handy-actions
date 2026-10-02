@@ -51,6 +51,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       output: 'static',
       favicon: './assets/images/favicon.png',
     },
+    updates: {
+      url: `https://u.expo.dev/${easProjectId}`,
+    },
     plugins: [
       'expo-router',
       [
