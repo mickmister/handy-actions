@@ -8,7 +8,6 @@
     "expo": "~57.0.26",
     "expo-constants": "~57.0.20",
     "expo-dev-client": "^57.0.19",
-    "expo-dev-client": "^57.0.19",
     "expo-font": "~57.0.4",
     "expo-linking": "~57.0.11",
     "expo-router": "~57.0.24",
@@ -30,6 +29,7 @@
   "devDependencies": {
     "@types/node": "^26.6.3",
     "@types/react": "~19.2.2",
+    "eas-cli": "^24.8.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
