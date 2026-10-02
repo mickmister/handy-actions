@@ -2,11 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  actionFromNotificationRowsData,
+  actionIdFromPressId,
   actionNotificationRows,
+  actionPressId,
   defaultHandyState,
   exportHandyState,
   importHandyState,
+  notificationBodyForPreset,
   notificationIdForPreset,
+  notificationRowsData,
   validateHandyState,
   type HandyPreset,
   type HandyState,
@@ -94,4 +99,28 @@ test('notification rows are stable and capped to OS-size controls', () => {
     actionNotificationRows(preset).map((row) => row.id),
     ['a1', 'a2', 'a3'],
   );
+});
+
+test('notification metadata builds real action press ids instead of body text commands', () => {
+  const preset: HandyPreset = {
+    id: 'conference',
+    name: 'Social/Conference',
+    enabled: true,
+    actions: [
+      { id: 'linkedin-one', name: 'LinkedIn', payload: { type: 'web', url: 'https://www.linkedin.com/in/example-one' } },
+      { id: 'linkedin-two', name: 'LinkedIn', payload: { type: 'web', url: 'https://www.linkedin.com/in/example-two' } },
+    ],
+  };
+
+  assert.equal(notificationBodyForPreset(preset), 'Long-press or expand for 2 actions.');
+  assert.equal(actionPressId('linkedin-one'), 'handy-action:linkedin-one');
+  assert.equal(actionIdFromPressId('handy-action:linkedin-two'), 'linkedin-two');
+  assert.equal(actionIdFromPressId('open-app'), undefined);
+
+  const action = actionFromNotificationRowsData('linkedin-two', notificationRowsData(preset));
+  assert.deepEqual(action, {
+    id: 'linkedin-two',
+    name: 'LinkedIn',
+    payload: { type: 'web', url: 'https://www.linkedin.com/in/example-two' },
+  });
 });

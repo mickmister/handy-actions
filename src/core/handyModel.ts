@@ -41,6 +41,8 @@ export type NotificationActionRow = {
   payload: HandyActionPayload;
 };
 
+export const ACTION_PRESS_PREFIX = 'handy-action:';
+
 export function defaultHandyState(): HandyState {
   return { presets: [] };
 }
@@ -157,6 +159,49 @@ export function actionNotificationRows(preset: HandyPreset): NotificationActionR
     title: action.name,
     payload: action.payload,
   }));
+}
+
+export function actionPressId(actionId: string): string {
+  return `${ACTION_PRESS_PREFIX}${actionId}`;
+}
+
+export function actionIdFromPressId(pressId: string): string | undefined {
+  return pressId.startsWith(ACTION_PRESS_PREFIX) ? pressId.slice(ACTION_PRESS_PREFIX.length) : undefined;
+}
+
+export function notificationBodyForPreset(preset: HandyPreset): string {
+  const count = actionNotificationRows(preset).length;
+  if (count === 0) return 'No actions configured.';
+  return count === 1 ? 'Long-press or expand for 1 action.' : `Long-press or expand for ${count} actions.`;
+}
+
+export function notificationRowsData(preset: HandyPreset): string {
+  return JSON.stringify(actionNotificationRows(preset));
+}
+
+export function actionFromNotificationRowsData(actionId: string, rawActions: unknown): HandyAction | undefined {
+  if (typeof rawActions !== 'string') return undefined;
+
+  try {
+    const parsed: unknown = JSON.parse(rawActions);
+    if (!Array.isArray(parsed)) return undefined;
+
+    for (const rawRow of parsed) {
+      if (!isRecord(rawRow) || rawRow.id !== actionId || !isNonEmptyString(rawRow.title)) continue;
+      if (validatePayload(rawRow.payload, 'payload').length > 0) continue;
+
+      const action: HandyAction = {
+        id: rawRow.id,
+        name: rawRow.title,
+        payload: rawRow.payload as HandyActionPayload,
+      };
+      return action;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
 }
 
 export function enabledPresets(state: HandyState): HandyPreset[] {

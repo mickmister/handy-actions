@@ -9,10 +9,15 @@ import notifee, {
 import { Linking, Platform } from 'react-native';
 
 import {
+  actionFromNotificationRowsData,
+  actionIdFromPressId,
   actionNotificationRows,
+  actionPressId,
   enabledPresets,
   findAction,
+  notificationBodyForPreset,
   notificationIdForPreset,
+  notificationRowsData,
   type HandyAction,
   type HandyActionPayload,
   type HandyState,
@@ -22,6 +27,7 @@ const CHANNEL_ID = 'handy-actions';
 
 let currentState: HandyState = { presets: [] };
 let actionHandler: ((action: HandyAction) => void) | undefined;
+let pendingAction: HandyAction | undefined;
 
 export type NotificationStatus = {
   permission: 'authorized' | 'denied' | 'provisional' | 'not-determined' | 'unavailable';
@@ -30,6 +36,11 @@ export type NotificationStatus = {
 
 export function setNotificationActionHandler(handler: (action: HandyAction) => void): void {
   actionHandler = handler;
+  if (!pendingAction) return;
+
+  const action = pendingAction;
+  pendingAction = undefined;
+  handler(action);
 }
 
 export async function getNotificationStatus(): Promise<NotificationStatus> {
@@ -86,7 +97,7 @@ export async function syncPresetNotifications(state: HandyState): Promise<string
         id: categoryIdForPreset(preset.id),
         actions: actionNotificationRows(preset)
           .slice(0, 2)
-          .map((row) => ({ id: row.id, title: row.title, foreground: true, authenticationRequired: true })),
+          .map((row) => ({ id: actionPressId(row.id), title: row.title, foreground: true })),
       })),
     );
   }
@@ -96,8 +107,8 @@ export async function syncPresetNotifications(state: HandyState): Promise<string
     await notifee.displayNotification({
       id: notificationIdForPreset(preset),
       title: preset.name,
-      body: rows.length === 0 ? 'No actions configured.' : rows.map((row, index) => `${index + 1}. ${row.title}`).join('   '),
-      data: { presetId: preset.id, actions: JSON.stringify(rows) },
+      body: notificationBodyForPreset(preset),
+      data: { presetId: preset.id, actions: notificationRowsData(preset) },
       android: {
         channelId: CHANNEL_ID,
         ongoing: true,
@@ -109,7 +120,7 @@ export async function syncPresetNotifications(state: HandyState): Promise<string
         actions: rows.map((row) => ({
           title: row.title,
           pressAction: {
-            id: row.id,
+            id: actionPressId(row.id),
             launchActivity: 'default',
             launchActivityFlags: [AndroidLaunchActivityFlag.SINGLE_TOP],
           },
@@ -140,7 +151,7 @@ export function registerNotificationEvents(): () => void {
 export async function consumeInitialNotification(): Promise<void> {
   if (Platform.OS === 'web') return;
   const initial = await notifee.getInitialNotification();
-  if (initial) await openActionId(initial.pressAction.id, initial.notification.data);
+  if (initial) await openPressAction(initial.pressAction.id, initial.notification.data);
 }
 
 export async function runActionPayload(payload: HandyActionPayload): Promise<void> {
@@ -164,18 +175,24 @@ export async function runActionPayload(payload: HandyActionPayload): Promise<voi
 
 async function handleNotificationEvent(event: Event): Promise<void> {
   if (event.type !== EventType.PRESS && event.type !== EventType.ACTION_PRESS) return;
-  await openActionId(event.detail.pressAction?.id, event.detail.notification?.data);
+  await openPressAction(event.detail.pressAction?.id, event.detail.notification?.data);
 }
 
-async function openActionId(actionId: unknown, data: unknown): Promise<void> {
-  if (typeof actionId !== 'string' || actionId === 'open-app') return;
+async function openPressAction(pressId: unknown, data: unknown): Promise<void> {
+  if (typeof pressId !== 'string') return;
 
+  const actionId = actionIdFromPressId(pressId);
+  if (!actionId) return;
   const found = findAction(currentState, actionId);
   const action = found?.action ?? actionFromNotificationData(actionId, data);
   if (!action) return;
 
   if (action.payload.type === 'qr') {
-    actionHandler?.(action);
+    if (actionHandler) {
+      actionHandler(action);
+      return;
+    }
+    pendingAction = action;
     return;
   }
 
@@ -188,13 +205,5 @@ function categoryIdForPreset(presetId: string): string {
 
 function actionFromNotificationData(actionId: string, data: unknown): HandyAction | undefined {
   if (!data || typeof data !== 'object' || !('actions' in data)) return undefined;
-  const rawActions = data.actions;
-  if (typeof rawActions !== 'string') return undefined;
-  try {
-    const rows = JSON.parse(rawActions) as Array<{ id: string; title: string; payload: HandyActionPayload }>;
-    const row = rows.find((candidate) => candidate.id === actionId);
-    return row ? { id: row.id, name: row.title, payload: row.payload } : undefined;
-  } catch {
-    return undefined;
-  }
+  return actionFromNotificationRowsData(actionId, data.actions);
 }
