@@ -38,13 +38,6 @@ runs:
         node-version: 22
         cache: pnpm
 
-    - name: Setup Expo
-      uses: expo/expo-github-action@v8
-      with:
-        eas-version: latest
-        token: ${{ inputs.expo-token }}
-        packager: pnpm
-
     - name: Install modules
       shell: bash
       run: pnpm install --frozen-lockfile
@@ -63,22 +56,29 @@ runs:
       env:
         EXPO_GITHUB_ACTIONS_RUN: true
         EXPO_APP_PROFILE: ${{ inputs.profile }}
-      run: eas build --non-interactive --wait --platform=${{ inputs.platform }} --profile=${{ inputs.profile }} --local
+        EXPO_TOKEN: ${{ inputs.expo-token }}
+      run: pnpm exec eas build --non-interactive --wait --platform=${{ inputs.platform }} --profile=${{ inputs.profile }} --local
 
     - name: Send build to EAS
       if: ${{ inputs.local != 'true' && (inputs.submit != 'true' || inputs.profile != 'production') }}
       shell: bash
       env:
         EXPO_APP_PROFILE: ${{ inputs.profile }}
+        EXPO_TOKEN: ${{ inputs.expo-token }}
       run: |
         if [[ "${{ inputs.output_logs }}" != "true" ]]; then
           exec >/dev/null 2>&1
         fi
-        eas build --non-interactive --wait --platform=${{ inputs.platform }} --profile=${{ inputs.profile }}
+        pnpm exec eas build --non-interactive --wait --platform=${{ inputs.platform }} --profile=${{ inputs.profile }}
 
     - name: Build and submit
       if: ${{ inputs.submit == 'true' && inputs.profile == 'production' }}
       shell: bash
       env:
         EXPO_APP_PROFILE: ${{ inputs.profile }}
-      run: eas build --non-interactive --wait --auto-submit --platform=${{ inputs.platform }} --profile=${{ inputs.profile }}
+        EXPO_TOKEN: ${{ inputs.expo-token }}
+      run: |
+        if [[ "${{ inputs.output_logs }}" != "true" ]]; then
+          exec >/dev/null 2>&1
+        fi
+        pnpm exec eas build --non-interactive --wait --auto-submit --platform=${{ inputs.platform }} --profile=${{ inputs.profile }}

@@ -30,13 +30,6 @@ runs:
         node-version: 22
         cache: pnpm
 
-    - name: Setup Expo
-      uses: expo/expo-github-action@v8
-      with:
-        eas-version: latest
-        token: ${{ inputs.expo-token }}
-        packager: pnpm
-
     - name: Install modules
       shell: bash
       run: pnpm install --frozen-lockfile
@@ -53,9 +46,10 @@ runs:
       shell: bash
       env:
         EXPO_APP_PROFILE: ${{ inputs.profile }}
+        EXPO_TOKEN: ${{ inputs.expo-token }}
       run: |
         UPDATE_MESSAGE="${{ inputs.message }}"
         if [ -z "$UPDATE_MESSAGE" ]; then
           UPDATE_MESSAGE="$(git log -1 --pretty=%B)"
         fi
-        eas update --non-interactive --channel=${{ inputs.profile }} --message="$UPDATE_MESSAGE" --platform=${{ inputs.platform }}
+        pnpm exec eas update --non-interactive --channel=${{ inputs.profile }} --message="$UPDATE_MESSAGE" --platform=${{ inputs.platform }}
