@@ -1,0 +1,61 @@
+name: Update Mobile App with EAS Update
+description: Publish an EAS Update for the Expo app.
+
+inputs:
+  expo-token:
+    description: Expo token
+    required: true
+  platform:
+    description: Platform to update (all/android/ios)
+    required: true
+  profile:
+    description: EAS profile/channel
+    required: true
+  message:
+    description: Update message
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 12.5.1
+
+    - name: Install Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: pnpm
+
+    - name: Setup Expo
+      uses: expo/expo-github-action@v8
+      with:
+        eas-version: latest
+        token: ${{ inputs.expo-token }}
+        packager: pnpm
+
+    - name: Install modules
+      shell: bash
+      run: pnpm install --frozen-lockfile
+
+    - name: Typecheck
+      shell: bash
+      run: pnpm run typecheck
+
+    - name: Unit tests
+      shell: bash
+      run: pnpm test
+
+    - name: Send update to EAS
+      shell: bash
+      env:
+        EXPO_APP_PROFILE: ${{ inputs.profile }}
+      run: |
+        UPDATE_MESSAGE="${{ inputs.message }}"
+        if [ -z "$UPDATE_MESSAGE" ]; then
+          UPDATE_MESSAGE="$(git log -1 --pretty=%B)"
+        fi
+        eas update --non-interactive --channel=${{ inputs.profile }} --message="$UPDATE_MESSAGE" --platform=${{ inputs.platform }}

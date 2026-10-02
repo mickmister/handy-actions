@@ -1,0 +1,52 @@
+name: build_mobile
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build for
+        type: choice
+        required: true
+        default: android
+        options:
+          - all
+          - android
+          - ios
+      profile:
+        description: EAS build profile
+        type: choice
+        required: true
+        default: preview
+        options:
+          - development
+          - preview
+          - production
+      run_on_eas:
+        description: Run build on EAS instead of locally in CI
+        type: boolean
+        default: true
+      submit:
+        description: Auto-submit production build
+        type: boolean
+        default: false
+      output_eas_build_to_logs:
+        description: Output EAS build logs
+        type: boolean
+        default: false
+
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Mobile App with EAS
+        uses: ./.github/actions/build_mobile_eas
+        with:
+          local: ${{ !inputs.run_on_eas }}
+          platform: ${{ inputs.platform }}
+          profile: ${{ inputs.profile }}
+          submit: ${{ inputs.submit }}
+          output_logs: ${{ inputs.output_eas_build_to_logs }}
+          expo-token: ${{ secrets.EXPO_TOKEN }}

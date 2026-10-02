@@ -1,0 +1,84 @@
+name: Build Mobile App with EAS
+description: Build the Expo app with EAS.
+
+inputs:
+  expo-token:
+    description: Expo token
+    required: true
+  platform:
+    description: Platform to build for (all/android/ios)
+    required: true
+  profile:
+    description: EAS build profile (development/preview/production)
+    required: true
+  submit:
+    description: Auto-submit production builds
+    required: false
+    default: 'false'
+  local:
+    description: Build locally in CI
+    required: false
+    default: 'false'
+  output_logs:
+    description: Output EAS build logs
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 12.5.1
+
+    - name: Install Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: pnpm
+
+    - name: Setup Expo
+      uses: expo/expo-github-action@v8
+      with:
+        eas-version: latest
+        token: ${{ inputs.expo-token }}
+        packager: pnpm
+
+    - name: Install modules
+      shell: bash
+      run: pnpm install --frozen-lockfile
+
+    - name: Typecheck
+      shell: bash
+      run: pnpm run typecheck
+
+    - name: Unit tests
+      shell: bash
+      run: pnpm test
+
+    - name: Build locally
+      if: ${{ inputs.local == 'true' }}
+      shell: bash
+      env:
+        EXPO_GITHUB_ACTIONS_RUN: true
+        EXPO_APP_PROFILE: ${{ inputs.profile }}
+      run: eas build --non-interactive --wait --platform=${{ inputs.platform }} --profile=${{ inputs.profile }} --local
+
+    - name: Send build to EAS
+      if: ${{ inputs.local != 'true' && (inputs.submit != 'true' || inputs.profile != 'production') }}
+      shell: bash
+      env:
+        EXPO_APP_PROFILE: ${{ inputs.profile }}
+      run: |
+        if [[ "${{ inputs.output_logs }}" != "true" ]]; then
+          exec >/dev/null 2>&1
+        fi
+        eas build --non-interactive --wait --platform=${{ inputs.platform }} --profile=${{ inputs.profile }}
+
+    - name: Build and submit
+      if: ${{ inputs.submit == 'true' && inputs.profile == 'production' }}
+      shell: bash
+      env:
+        EXPO_APP_PROFILE: ${{ inputs.profile }}
+      run: eas build --non-interactive --wait --auto-submit --platform=${{ inputs.platform }} --profile=${{ inputs.profile }}

@@ -1,0 +1,54 @@
+{
+  "cli": {
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "base": {
+      "pnpm": "12.5.1",
+      "node": "22.23.2",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_USE_FAST_RESOLVER": "true"
+      }
+    },
+    "development": {
+      "extends": "base",
+      "channel": "development",
+      "distribution": "internal",
+      "developmentClient": true,
+      "env": {
+        "EXPO_APP_PROFILE": "development"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "resourceClass": "m1-medium"
+      }
+    },
+    "preview": {
+      "extends": "base",
+      "channel": "preview",
+      "distribution": "internal",
+      "developmentClient": false,
+      "env": {
+        "EXPO_APP_PROFILE": "preview"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "ios": {
+        "resourceClass": "m1-medium"
+      }
+    },
+    "production": {
+      "extends": "base",
+      "channel": "production",
+      "distribution": "store",
+      "developmentClient": false,
+      "env": {
+        "EXPO_APP_PROFILE": "production"
+      }
+    }
+  }
+}

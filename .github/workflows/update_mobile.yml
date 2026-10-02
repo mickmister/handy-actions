@@ -1,0 +1,43 @@
+name: update_mobile
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to update
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - android
+          - ios
+      profile:
+        description: EAS update channel/profile
+        type: choice
+        required: true
+        default: preview
+        options:
+          - development
+          - preview
+          - production
+      message:
+        description: Update message
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Update Mobile App with EAS
+        uses: ./.github/actions/update_mobile_eas
+        with:
+          platform: ${{ inputs.platform }}
+          profile: ${{ inputs.profile }}
+          message: ${{ inputs.message }}
+          expo-token: ${{ secrets.EXPO_TOKEN }}
