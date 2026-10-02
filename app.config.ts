@@ -6,6 +6,7 @@ const appQualifier = appProfile.includes('production') ? '' : appProfile;
 const appQualifierWithDash = appQualifier ? `${appQualifier}-` : '';
 const appQualifierWithDot = appQualifier ? `.${appQualifier}` : '';
 const version = '0.1.0';
+const defaultEasProjectId = '680e1a0b-7078-4fca-8d3d-7afe2e877d9b';
 
 const ids = {
   title: 'Handy Actions',
@@ -15,7 +16,7 @@ const ids = {
 };
 
 export default ({ config }: ConfigContext): ExpoConfig => {
-  const easProjectId = env.EXPO_PROJECT_ID || env.EAS_PROJECT_ID;
+  const easProjectId = env.EXPO_PROJECT_ID || env.EAS_PROJECT_ID || defaultEasProjectId;
 
   return {
     ...config,
@@ -69,7 +70,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     extra: {
       ...config.extra,
-      eas: easProjectId ? { projectId: easProjectId } : undefined,
+      eas: {
+        projectId: easProjectId,
+      },
     },
   };
 };
