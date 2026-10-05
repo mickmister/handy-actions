@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { GlassPanel } from '@/components/GlassPanel';
 import { syncPresetNotifications } from '@/src/core/handyNotifications';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 
@@ -30,13 +31,13 @@ export default function PresetsScreen() {
         </Text>
       </View>
 
-      <View style={styles.statusCard}>
+      <GlassPanel style={styles.statusCard} fallbackStyle={styles.statusCardFallback}>
         <Text style={styles.statusTitle}>{enabledCount} enabled</Text>
         <Text style={styles.statusCopy}>{handy.message}</Text>
         <Pressable style={styles.primaryButton} onPress={refreshNotifications}>
           <Text style={styles.primaryButtonText}>Refresh lock screen</Text>
         </Pressable>
-      </View>
+      </GlassPanel>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>New preset</Text>
@@ -105,7 +106,8 @@ const styles = StyleSheet.create({
   eyebrow: { color: '#53657d', fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
   title: { color: '#0f172a', fontSize: 30, fontWeight: '800', letterSpacing: -0.6 },
   copy: { color: '#516070', fontSize: 16, lineHeight: 23 },
-  statusCard: { backgroundColor: '#111827', borderRadius: 24, gap: 12, padding: 18 },
+  statusCard: { borderRadius: 24, gap: 12, padding: 18 },
+  statusCardFallback: { backgroundColor: '#111827' },
   statusTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
   statusCopy: { color: '#cbd5e1', fontSize: 15, lineHeight: 21 },
   card: { backgroundColor: '#fff', borderColor: '#e5e9f0', borderRadius: 22, borderWidth: 1, gap: 12, padding: 16 },
