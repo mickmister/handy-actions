@@ -17,17 +17,14 @@
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.3",
     "expo-updates": "~57.0.24",
-    "expo-web-browser": "~57.0.3",
     "expo-widgets": "~57.0.22",
     "react": "19.2.3",
-    "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-qrcode-svg": "^6.3.26",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "^15.15.5",
-    "react-native-web": "~0.21.0",
     "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
@@ -40,8 +37,6 @@
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "start:go": "expo start",
-    "web": "expo start --web",
     "test": "node --experimental-strip-types --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

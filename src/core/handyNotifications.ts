@@ -52,10 +52,6 @@ export function setNotificationPressHandler(handler: (target: NotificationPressT
 }
 
 export async function getNotificationStatus(): Promise<NotificationStatus> {
-  if (Platform.OS === 'web') {
-    return { permission: 'unavailable', message: 'Native lock-screen notifications require iOS or Android.' };
-  }
-
   const settings = await notifee.getNotificationSettings();
   if (settings.authorizationStatus === AuthorizationStatus.AUTHORIZED) {
     return { permission: 'authorized', message: 'Notifications are allowed.' };
@@ -70,15 +66,12 @@ export async function getNotificationStatus(): Promise<NotificationStatus> {
 }
 
 export async function requestNotificationAccess(): Promise<NotificationStatus> {
-  if (Platform.OS === 'web') return getNotificationStatus();
   await notifee.requestPermission();
   await configureNotificationSurface();
   return getNotificationStatus();
 }
 
 export async function configureNotificationSurface(): Promise<void> {
-  if (Platform.OS === 'web') return;
-
   if (Platform.OS === 'android') {
     await notifee.createChannel({
       id: CHANNEL_ID,
@@ -93,7 +86,6 @@ export async function configureNotificationSurface(): Promise<void> {
 
 export async function syncPresetNotifications(state: HandyState): Promise<string> {
   currentState = state;
-  if (Platform.OS === 'web') return 'Native notifications are unavailable on web.';
 
   await requestNotificationAccess();
   await notifee.cancelAllNotifications();
@@ -161,7 +153,6 @@ export function registerNotificationEvents(): () => void {
 }
 
 export async function consumeInitialNotification(): Promise<void> {
-  if (Platform.OS === 'web') return;
   const initial = await notifee.getInitialNotification();
   if (initial) await openPressAction(initial.pressAction?.id, initial.notification.data);
 }
@@ -232,7 +223,6 @@ function deliverPressTarget(target: NotificationPressTarget): void {
 }
 
 async function syncStoredPresetNotifications(): Promise<void> {
-  if (Platform.OS === 'web') return;
   try {
     await syncPresetNotifications(await loadHandyState());
   } catch {

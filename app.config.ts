@@ -24,6 +24,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     slug: ids.slug,
     version,
     scheme: `${ids.flat}${appQualifier}`,
+    platforms: ['ios', 'android'],
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     userInterfaceStyle: 'automatic',
@@ -45,11 +46,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
       permissions: ['android.permission.POST_NOTIFICATIONS'],
       predictiveBackGestureEnabled: false,
-    },
-    web: {
-      bundler: 'metro',
-      output: 'static',
-      favicon: './assets/images/favicon.png',
     },
     updates: {
       url: `https://u.expo.dev/${easProjectId}`,
