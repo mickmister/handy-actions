@@ -64,6 +64,11 @@ runs:
         packages: platform-tools
         log-accepted-android-sdk-licenses: 'false'
 
+    - name: Select Xcode for Expo SDK 57
+      if: ${{ inputs.local == 'true' && inputs.platform == 'ios' }}
+      shell: bash
+      run: sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer && xcodebuild -version
+
     - name: Build locally
       if: ${{ inputs.local == 'true' }}
       shell: bash
@@ -71,7 +76,18 @@ runs:
         EXPO_GITHUB_ACTIONS_RUN: true
         EXPO_APP_PROFILE: ${{ inputs.profile == 'validation' && 'preview' || inputs.profile }}
         EXPO_TOKEN: ${{ inputs.expo-token }}
+        EAS_LOCAL_BUILD_SKIP_CLEANUP: '1'
+        EAS_LOCAL_BUILD_WORKINGDIR: ${{ runner.temp }}/eas-local
       run: pnpm exec eas build --non-interactive --wait --platform=${{ inputs.platform }} --profile=${{ inputs.profile }} --local
+
+    - name: Upload failed local build logs
+      if: ${{ failure() && inputs.local == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: local-build-logs-${{ inputs.platform }}
+        path: ${{ runner.temp }}/eas-local/logs
+        if-no-files-found: ignore
+        retention-days: 7
 
     - name: Send build to EAS
       if: ${{ inputs.local != 'true' && (inputs.submit != 'true' || inputs.profile != 'production') }}
