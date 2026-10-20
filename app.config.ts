@@ -52,7 +52,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     plugins: [
       'expo-router',
-      './plugins/withAlignedWorkManager',
+      './plugins/withAndroidBuildCompatibility',
       [
         'expo-splash-screen',
         {

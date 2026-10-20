@@ -15,11 +15,15 @@
       "extends": "preview",
       "autoIncrement": false,
       "ios": {
-        "simulator": true
+        "simulator": true,
+        "env": {
+          "GYM_XCARGS": "ARCHS=arm64 ONLY_ACTIVE_ARCH=YES"
+        }
       },
       "android": {
         "buildType": "apk",
-        "withoutCredentials": true
+        "withoutCredentials": true,
+        "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=arm64-v8a --max-workers=2"
       }
     },
     "development": {

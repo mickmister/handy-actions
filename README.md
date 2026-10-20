@@ -26,11 +26,13 @@ Expo compilation runs in GitHub Actions, not on the developer machine:
 
 | Change / goal | Workflow | Execution |
 | --- | --- | --- |
-| Validate compilation | `validate_mobile` | Typecheck, unit tests, then `eas build --local` on CI runners: iOS simulator on macOS, Android APK on Ubuntu. Runs on pushes, same-repository PRs and manual dispatch. |
+| Validate compilation | `validate_mobile` | Typecheck, unit tests, then `eas build --local` on CI runners: arm64 iOS simulator on macOS 26/Xcode 26.6, arm64 Android release APK on Ubuntu. Runs on pushes, same-repository PRs and manual dispatch. |
 | New RN dependency, native code or native configuration | `build_mobile`, `run_on_eas=true` | Remote EAS build. Use iOS `preview`, `submit=false` for ad hoc device testing. |
 | Source/assets only, compatible native runtime | `update_mobile` | EAS Update to the installed build's channel/runtime. |
 
 `build_mobile` also supports `run_on_eas=false` for CI-runner builds; iOS uses macOS, and `all` is split into individual builds. Both release workflows already include typecheck and unit tests. `EXPO_TOKEN` must be configured in GitHub secrets. Validation simulator/unsigned Android builds do not require device-distribution signing credentials.
+
+Validation compiles one architecture per platform to keep feedback practical; remote release profiles retain their normal architecture selection. The Android config plugin aligns WorkManager KTX with Expo/Notifee's runtime and raises Gradle's Metaspace limit after a confirmed release-lint memory failure.
 
 Runtime versions use Expo's native fingerprint policy so updates with different native requirements do not reach incompatible older binaries. The first fingerprint-policy release requires a fresh binary. This widget release changes native extension configuration and therefore needs a remote EAS build, even though no RN dependency was added.
 
