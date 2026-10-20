@@ -60,6 +60,9 @@ runs:
     - name: Configure Android SDK for local builds
       if: ${{ inputs.local == 'true' && inputs.platform == 'android' }}
       uses: android-actions/setup-android@v3
+      with:
+        packages: platform-tools
+        log-accepted-android-sdk-licenses: 'false'
 
     - name: Build locally
       if: ${{ inputs.local == 'true' }}
