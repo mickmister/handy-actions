@@ -67,7 +67,7 @@ runs:
     - name: Select Xcode for Expo SDK 57
       if: ${{ inputs.local == 'true' && inputs.platform == 'ios' }}
       shell: bash
-      run: sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer && xcodebuild -version
+      run: sudo xcode-select --switch /Applications/Xcode_26.6.app/Contents/Developer && xcodebuild -version
 
     - name: Build locally
       if: ${{ inputs.local == 'true' }}
