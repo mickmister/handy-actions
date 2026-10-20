@@ -1,6 +1,6 @@
 {
   "name": "handy-actions",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "version": "0.1.0",
   "dependencies": {
     "@expo/ui": "~57.0.21",

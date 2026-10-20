@@ -11,6 +11,17 @@
         "EXPO_USE_FAST_RESOLVER": "true"
       }
     },
+    "validation": {
+      "extends": "preview",
+      "autoIncrement": false,
+      "ios": {
+        "simulator": true
+      },
+      "android": {
+        "buildType": "apk",
+        "withoutCredentials": true
+      }
+    },
     "development": {
       "extends": "base",
       "channel": "development",

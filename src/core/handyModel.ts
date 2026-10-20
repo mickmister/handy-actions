@@ -14,7 +14,24 @@ export type DeepLinkActionPayload = {
   fallbackUrl?: string;
 };
 
-export type HandyActionPayload = QrActionPayload | WebActionPayload | DeepLinkActionPayload;
+export type TextInputActionPayload = {
+  type: 'text-input';
+  urlTemplate: string;
+  fallbackUrlTemplate?: string;
+};
+
+export type HandyActionPayload = QrActionPayload | WebActionPayload | DeepLinkActionPayload | TextInputActionPayload;
+
+export type SurfaceSettings = {
+  liveActivities: boolean;
+  lockScreenWidgets: boolean;
+  notifications: boolean;
+  widgetPresetId?: string;
+};
+
+export function surfaceSettings(state: HandyState): SurfaceSettings {
+  return { liveActivities: true, lockScreenWidgets: false, notifications: true, ...state.surfaces };
+}
 
 export type HandyAction = {
   id: string;
@@ -31,6 +48,7 @@ export type HandyPreset = {
 
 export type HandyState = {
   presets: HandyPreset[];
+  surfaces?: SurfaceSettings;
 };
 
 export type ValidationResult = { ok: true; errors: [] } | { ok: false; errors: string[] };
@@ -50,6 +68,7 @@ export type HandyActionsLiveActivityProps = {
   thirdAction: string;
   updatedAt: string;
   openUrl: string;
+  actionLinks?: { title: string; url: string }[];
 };
 
 export const ACTION_PRESS_PREFIX = 'handy-action:';
@@ -93,6 +112,12 @@ export function normalizeHandyState(value: unknown): HandyState {
   }
 
   return {
+    ...(isRecord(value.surfaces) ? { surfaces: {
+      liveActivities: value.surfaces.liveActivities !== false,
+      lockScreenWidgets: value.surfaces.lockScreenWidgets === true,
+      notifications: value.surfaces.notifications !== false,
+      ...(typeof value.surfaces.widgetPresetId === 'string' ? { widgetPresetId: value.surfaces.widgetPresetId } : {}),
+    } } : {}),
     presets: value.presets.map((rawPreset): HandyPreset => {
       const preset = isRecord(rawPreset) ? rawPreset : {};
       const rawActions = Array.isArray(preset.actions) ? preset.actions : [];
@@ -122,6 +147,12 @@ export function validateHandyState(state: unknown): ValidationResult {
   }
 
   const presetIds = new Set<string>();
+  if (state.surfaces !== undefined) {
+    const settings = state.surfaces;
+    if (!isRecord(settings) || ['liveActivities', 'lockScreenWidgets', 'notifications'].some((key) => typeof settings[key] !== 'boolean')) {
+      errors.push('surfaces must contain boolean liveActivities, lockScreenWidgets and notifications settings.');
+    }
+  }
   for (const [presetIndex, rawPreset] of state.presets.entries()) {
     const preset = isRecord(rawPreset) ? rawPreset : {};
     const path = `presets[${presetIndex}]`;
@@ -152,8 +183,9 @@ export function validateHandyState(state: unknown): ValidationResult {
   return errors.length === 0 ? { ok: true, errors: [] } : { ok: false, errors };
 }
 
-export function findAction(state: HandyState, actionId: string): { preset: HandyPreset; action: HandyAction } | undefined {
+export function findAction(state: HandyState, actionId: string, presetId?: string): { preset: HandyPreset; action: HandyAction } | undefined {
   for (const preset of state.presets) {
+    if (presetId && preset.id !== presetId) continue;
     const action = preset.actions.find((candidate) => candidate.id === actionId);
     if (action) return { preset, action };
   }
@@ -248,6 +280,13 @@ export function enabledPresets(state: HandyState): HandyPreset[] {
 
 function validatePayload(payload: unknown, path: string): string[] {
   if (!isRecord(payload)) return [`${path} must be an object.`];
+  if (payload.type === 'text-input') {
+    const errors = validTextTemplate(payload.urlTemplate) ? [] : [`${path}.urlTemplate must be an app/https URL containing {text} in its query or path.`];
+    if (payload.fallbackUrlTemplate !== undefined && (!validTextTemplate(payload.fallbackUrlTemplate) || !isHttpUrl(payload.fallbackUrlTemplate.replaceAll('{text}', 'note')))) {
+      errors.push(`${path}.fallbackUrlTemplate must be an http(s) URL containing {text}.`);
+    }
+    return errors;
+  }
   if (payload.type === 'qr') {
     return isNonEmptyString(payload.value) ? [] : [`${path}.value must be a non-empty string for QR actions.`];
   }
@@ -261,11 +300,17 @@ function validatePayload(payload: unknown, path: string): string[] {
     }
     return errors;
   }
-  return [`${path}.type must be "qr", "web", or "deeplink".`];
+  return [`${path}.type must be "qr", "web", "deeplink", or "text-input".`];
 }
 
 function normalizePayload(payload: unknown): HandyActionPayload {
   if (!isRecord(payload)) return { type: 'qr', value: '' };
+  if (payload.type === 'text-input' && typeof payload.urlTemplate === 'string') {
+    return {
+      type: 'text-input', urlTemplate: payload.urlTemplate,
+      ...(typeof payload.fallbackUrlTemplate === 'string' ? { fallbackUrlTemplate: payload.fallbackUrlTemplate } : {}),
+    };
+  }
   if (payload.type === 'web' && typeof payload.url === 'string') return { type: 'web', url: payload.url };
   if (payload.type === 'deeplink' && typeof payload.url === 'string') {
     return typeof payload.fallbackUrl === 'string'
@@ -300,4 +345,25 @@ function isHttpUrl(value: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+function validTextTemplate(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.includes('{text}')) return false;
+  try {
+    const url = new URL(value.replaceAll('{text}', 'note'));
+    return /^[a-z][a-z0-9+.-]*:\/\//i.test(value) && !['javascript:', 'data:', 'file:'].includes(url.protocol)
+      && !value.slice(0, value.indexOf('://') + 3).includes('{text}')
+      && !value.slice(value.indexOf('://') + 3).split(/[/?#]/)[0].includes('{text}');
+  } catch { return false; }
+}
+
+export function textInputUrl(template: string, text: string): string {
+  if (!validTextTemplate(template)) throw new Error('Invalid text destination template. Include {text} in a URL query or path.');
+  if (!text.trim()) throw new Error('Enter a note first.');
+  return template.replaceAll('{text}', encodeURIComponent(text));
+}
+
+export function widgetPreset(state: HandyState): HandyPreset | undefined {
+  const presets = enabledPresets(state);
+  return presets.find((preset) => preset.id === surfaceSettings(state).widgetPresetId) ?? presets[0];
 }

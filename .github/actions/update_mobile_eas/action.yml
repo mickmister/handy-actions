@@ -47,8 +47,8 @@ runs:
       env:
         EXPO_APP_PROFILE: ${{ inputs.profile }}
         EXPO_TOKEN: ${{ inputs.expo-token }}
+        UPDATE_MESSAGE: ${{ inputs.message }}
       run: |
-        UPDATE_MESSAGE="${{ inputs.message }}"
         if [ -z "$UPDATE_MESSAGE" ]; then
           UPDATE_MESSAGE="$(git log -1 --pretty=%B)"
         fi

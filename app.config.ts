@@ -64,6 +64,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         'expo-widgets',
         {
           frequentUpdates: true,
+          widgets: [{
+            name: 'HandyActionsWidget',
+            displayName: 'Handy Actions',
+            description: 'Launch preset actions and capture notes from your Lock Screen.',
+            ios: { supportedFamilies: ['accessoryCircular', 'accessoryRectangular', 'accessoryInline'] },
+            android: null,
+          }],
         },
       ],
     ],
@@ -71,7 +78,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       typedRoutes: true,
     },
     runtimeVersion: {
-      policy: 'appVersion',
+      policy: 'fingerprint',
     },
     extra: {
       ...config.extra,

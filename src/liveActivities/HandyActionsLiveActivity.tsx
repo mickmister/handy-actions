@@ -1,4 +1,4 @@
-import { Image, Text, VStack } from '@expo/ui/swift-ui';
+import { Image, Link, Text, VStack } from '@expo/ui/swift-ui';
 import { activityBackgroundTint, font, foregroundStyle, padding } from '@expo/ui/swift-ui/modifiers';
 import { createLiveActivity, type LiveActivityEnvironment } from 'expo-widgets';
 
@@ -18,15 +18,9 @@ const HandyActionsActivity = (props: HandyActionsLiveActivityProps, environment:
           {props.presetName}
         </Text>
         <Text modifiers={[font({ size: 13 }), foregroundStyle(accentColor)]}>{actionLine}</Text>
-        {props.firstAction ? (
-          <Text modifiers={[font({ size: 13 }), foregroundStyle(secondaryColor)]}>• {props.firstAction}</Text>
-        ) : null}
-        {props.secondAction ? (
-          <Text modifiers={[font({ size: 13 }), foregroundStyle(secondaryColor)]}>• {props.secondAction}</Text>
-        ) : null}
-        {props.thirdAction ? (
-          <Text modifiers={[font({ size: 13 }), foregroundStyle(secondaryColor)]}>• {props.thirdAction}</Text>
-        ) : null}
+        {(props.actionLinks ?? []).map((action) => <Link key={action.url} destination={action.url}
+          label={action.title} modifiers={[font({ size: 15, weight: 'bold' }), foregroundStyle(accentColor), padding({ vertical: 4 })]} />)}
+        <Link destination={props.openUrl} label="All actions" modifiers={[font({ size: 12 }), foregroundStyle('#FFFFFF')]} />
       </VStack>
     ),
     compactLeading: <Image systemName="link.circle.fill" color={accentColor} />,
@@ -47,7 +41,9 @@ const HandyActionsActivity = (props: HandyActionsLiveActivityProps, environment:
     expandedBottom: (
       <VStack modifiers={[padding({ all: 10 })]}>
         <Text modifiers={[font({ weight: 'bold' }), foregroundStyle('#FFFFFF')]}>{props.presetName}</Text>
-        <Text modifiers={[font({ size: 12 }), foregroundStyle(secondaryColor)]}>Tap to open the action list</Text>
+        {(props.actionLinks ?? []).map((action) => <Link key={action.url} destination={action.url}
+          label={action.title} modifiers={[font({ size: 14, weight: 'bold' }), foregroundStyle(accentColor), padding({ vertical: 3 })]} />)}
+        <Link destination={props.openUrl} label="All actions" modifiers={[font({ size: 12 }), foregroundStyle('#FFFFFF')]} />
       </VStack>
     ),
   };

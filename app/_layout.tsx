@@ -1,7 +1,8 @@
 import { useFonts } from 'expo-font';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
@@ -10,6 +11,7 @@ import {
   consumeInitialNotification,
   registerNotificationEvents,
   setNotificationPressHandler,
+  resumePendingNote,
 } from '@/src/core/handyNotifications';
 import { HandyStateProvider } from '@/src/hooks/HandyStateProvider';
 
@@ -52,9 +54,16 @@ export default function RootLayout() {
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
   const router = useRouter();
+  const routedSubmissions = useRef(new Set<string>());
 
   useEffect(() => {
     setNotificationPressHandler((target) => {
+      if (target.type === 'input') {
+        if (routedSubmissions.current.has(target.submissionId)) return;
+        routedSubmissions.current.add(target.submissionId);
+        router.push({ pathname: '/capture', params: { submissionId: target.submissionId } });
+        return;
+      }
       if (target.type === 'preset') {
         router.push({ pathname: '/preset-actions', params: { presetId: target.presetId } });
         return;
@@ -62,11 +71,19 @@ function RootLayoutNav() {
       if (target.action.payload.type === 'qr') {
         router.push({ pathname: '/qr', params: { title: target.action.name, value: target.action.payload.value } });
       }
+      if (target.action.payload.type === 'text-input') {
+        router.push({ pathname: '/capture', params: { actionId: target.action.id, presetId: target.presetId } });
+      }
     });
 
-    void configureNotificationSurface();
-    void consumeInitialNotification();
-    return registerNotificationEvents();
+    void configureNotificationSurface().catch(console.warn);
+    void consumeInitialNotification().catch(console.warn);
+    void resumePendingNote().catch(console.warn);
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void resumePendingNote().catch(console.warn);
+    });
+    const unsubscribe = registerNotificationEvents();
+    return () => { unsubscribe(); appStateSubscription.remove(); };
   }, [router]);
 
   return (

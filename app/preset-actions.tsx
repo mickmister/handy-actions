@@ -14,6 +14,10 @@ export default function PresetActionsScreen() {
   const title = !handy.loaded ? 'Loading actions…' : preset?.name ?? 'Preset not found';
 
   async function useAction(action: HandyAction) {
+    if (action.payload.type === 'text-input') {
+      router.push({ pathname: '/capture', params: { actionId: action.id, presetId } });
+      return;
+    }
     const message = await syncPresetNotifications(handy.state);
     handy.setMessage(message);
 
@@ -58,7 +62,7 @@ export default function PresetActionsScreen() {
               <Text style={styles.typePill}>{action.payload.type}</Text>
             </View>
             <Pressable style={styles.primaryButton} onPress={() => void useAction(action)}>
-              <Text style={styles.primaryButtonText}>{action.payload.type === 'qr' ? 'Show QR' : 'Open'}</Text>
+              <Text style={styles.primaryButtonText}>{action.payload.type === 'qr' ? 'Show QR' : action.payload.type === 'text-input' ? 'Add Note' : 'Open'}</Text>
             </Pressable>
           </View>
         ))}
@@ -68,6 +72,7 @@ export default function PresetActionsScreen() {
 }
 
 function actionSummary(action: HandyAction): string {
+  if (action.payload.type === 'text-input') return action.payload.urlTemplate;
   if (action.payload.type === 'qr') return action.payload.value;
   if (action.payload.type === 'deeplink' && action.payload.fallbackUrl) {
     return `${action.payload.url} · fallback ${action.payload.fallbackUrl}`;

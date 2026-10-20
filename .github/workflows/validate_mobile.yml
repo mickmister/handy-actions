@@ -1,0 +1,39 @@
+name: validate_mobile
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    # EAS authentication is required; fork PRs do not receive repository secrets.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ios
+            runner: macos-15
+          - platform: android
+            runner: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Typecheck, test, and compile locally on the CI runner
+        uses: ./.github/actions/build_mobile_eas
+        with:
+          local: 'true'
+          platform: ${{ matrix.platform }}
+          profile: validation
+          submit: 'false'
+          output_logs: 'true'
+          expo-token: ${{ secrets.EXPO_TOKEN }}

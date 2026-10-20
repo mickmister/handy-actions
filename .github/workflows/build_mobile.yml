@@ -36,7 +36,11 @@ on:
 
 jobs:
   mobile:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ inputs.platform == 'all' && fromJSON('["ios", "android"]') || fromJSON(format('["{0}"]', inputs.platform)) }}
+    runs-on: ${{ !inputs.run_on_eas && matrix.platform == 'ios' && 'macos-15' || 'ubuntu-latest' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -45,7 +49,7 @@ jobs:
         uses: ./.github/actions/build_mobile_eas
         with:
           local: ${{ !inputs.run_on_eas }}
-          platform: ${{ inputs.platform }}
+          platform: ${{ matrix.platform }}
           profile: ${{ inputs.profile }}
           submit: ${{ inputs.submit }}
           output_logs: ${{ inputs.output_eas_build_to_logs }}

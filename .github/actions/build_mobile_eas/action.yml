@@ -9,7 +9,7 @@ inputs:
     description: Platform to build for (all/android/ios)
     required: true
   profile:
-    description: EAS build profile (development/preview/production)
+    description: EAS build profile (validation/development/preview/production)
     required: true
   submit:
     description: Auto-submit production builds
@@ -50,12 +50,23 @@ runs:
       shell: bash
       run: pnpm test
 
+    - name: Install Java for local Android builds
+      if: ${{ inputs.local == 'true' && inputs.platform == 'android' }}
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '17'
+
+    - name: Configure Android SDK for local builds
+      if: ${{ inputs.local == 'true' && inputs.platform == 'android' }}
+      uses: android-actions/setup-android@v3
+
     - name: Build locally
       if: ${{ inputs.local == 'true' }}
       shell: bash
       env:
         EXPO_GITHUB_ACTIONS_RUN: true
-        EXPO_APP_PROFILE: ${{ inputs.profile }}
+        EXPO_APP_PROFILE: ${{ inputs.profile == 'validation' && 'preview' || inputs.profile }}
         EXPO_TOKEN: ${{ inputs.expo-token }}
       run: pnpm exec eas build --non-interactive --wait --platform=${{ inputs.platform }} --profile=${{ inputs.profile }} --local
 
@@ -72,7 +83,7 @@ runs:
         pnpm exec eas build --non-interactive --wait --platform=${{ inputs.platform }} --profile=${{ inputs.profile }}
 
     - name: Build and submit
-      if: ${{ inputs.submit == 'true' && inputs.profile == 'production' }}
+      if: ${{ inputs.local != 'true' && inputs.submit == 'true' && inputs.profile == 'production' }}
       shell: bash
       env:
         EXPO_APP_PROFILE: ${{ inputs.profile }}

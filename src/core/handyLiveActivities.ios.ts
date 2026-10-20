@@ -3,6 +3,7 @@ import * as ExpoLinking from 'expo-linking';
 import {
   enabledPresets,
   liveActivityPropsForPreset,
+  surfaceSettings,
   type HandyActionsLiveActivityProps,
   type HandyState,
 } from './handyModel';
@@ -20,10 +21,16 @@ export async function syncPresetLiveActivities(state: HandyState): Promise<void>
     }
   }
 
+  if (!surfaceSettings(state).liveActivities) return;
   const staleDate = new Date(Date.now() + LIVE_ACTIVITY_STALE_MS);
   for (const preset of enabledPresets(state)) {
     const openUrl = ExpoLinking.createURL('/preset-actions', { queryParams: { presetId: preset.id } });
-    HandyActionsLiveActivity.start(liveActivityPropsForPreset(preset, new Date().toISOString(), openUrl), openUrl, staleDate);
+    const props = liveActivityPropsForPreset(preset, new Date().toISOString(), openUrl);
+    props.actionLinks = preset.actions.slice(0, 3).map((action) => ({
+      title: action.name,
+      url: ExpoLinking.createURL('/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: action.payload.type === 'text-input' ? '1' : '0' } }),
+    }));
+    HandyActionsLiveActivity.start(props, openUrl, staleDate);
   }
 }
 

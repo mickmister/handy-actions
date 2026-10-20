@@ -8,6 +8,7 @@ import {
   validateHandyState,
   type HandyActionPayload,
   type HandyState,
+  type SurfaceSettings,
 } from '@/src/core/handyModel';
 import { loadHandyState, saveHandyState } from '@/src/core/handyStore';
 
@@ -43,8 +44,8 @@ export function useHandyState() {
     const validation = validateHandyState(next);
     if (!validation.ok) return { ok: false, message: validation.errors.join('\n') };
 
-    setState(next);
     await saveHandyState(next);
+    setState(next);
     setMessage(okMessage);
     return { ok: true, message: okMessage };
   }, []);
@@ -53,6 +54,7 @@ export function useHandyState() {
     (name: string) =>
       persist(
         {
+          ...state,
           presets: [
             ...state.presets,
             { id: makeId('preset'), name: name.trim() || 'Untitled preset', enabled: false, actions: [] },
@@ -67,6 +69,7 @@ export function useHandyState() {
     (presetId: string) =>
       persist(
         {
+          ...state,
           presets: state.presets.map((preset) =>
             preset.id === presetId ? { ...preset, enabled: !preset.enabled } : preset,
           ),
@@ -78,7 +81,7 @@ export function useHandyState() {
 
   const deletePreset = useCallback(
     (presetId: string) =>
-      persist({ presets: state.presets.filter((preset) => preset.id !== presetId) }, 'Preset deleted.'),
+      persist({ ...state, presets: state.presets.filter((preset) => preset.id !== presetId) }, 'Preset deleted.'),
     [persist, state],
   );
 
@@ -86,6 +89,7 @@ export function useHandyState() {
     (presetId: string, name: string, payload: HandyActionPayload) =>
       persist(
         {
+          ...state,
           presets: state.presets.map((preset) =>
             preset.id === presetId
               ? {
@@ -104,6 +108,7 @@ export function useHandyState() {
     (presetId: string, actionId: string) =>
       persist(
         {
+          ...state,
           presets: state.presets.map((preset) =>
             preset.id === presetId
               ? { ...preset, actions: preset.actions.filter((action) => action.id !== actionId) }
@@ -122,6 +127,12 @@ export function useHandyState() {
 
   const exportText = useMemo(() => exportHandyState(state), [state]);
 
+  const updateSurfaces = (surfaces: SurfaceSettings) => persist({ ...state, surfaces }, 'Lock-screen settings saved.');
+  const updateAction = (presetId: string, actionId: string, name: string, payload: HandyActionPayload) =>
+    persist({ ...state, presets: state.presets.map((preset) => preset.id === presetId
+      ? { ...preset, actions: preset.actions.map((action) => action.id === actionId ? { ...action, name: name.trim() || 'Untitled action', payload } : action) }
+      : preset) }, 'Action updated.');
+
   return {
     state,
     loaded,
@@ -134,5 +145,7 @@ export function useHandyState() {
     deleteAction,
     importText,
     exportText,
+    updateSurfaces,
+    updateAction,
   };
 }

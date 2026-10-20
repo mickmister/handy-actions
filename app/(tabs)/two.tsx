@@ -5,6 +5,7 @@ import { runActionPayload } from '@/src/core/handyNotifications';
 import type { HandyActionPayload } from '@/src/core/handyModel';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 import { Link } from 'expo-router';
+import * as ExpoLinking from 'expo-linking';
 
 type PayloadType = HandyActionPayload['type'];
 
@@ -19,15 +20,19 @@ export default function ActionsScreen() {
   const [type, setType] = useState<PayloadType>('qr');
   const [value, setValue] = useState('');
   const [fallbackUrl, setFallbackUrl] = useState('');
+  const [editingId, setEditingId] = useState<string>();
 
   async function addAction() {
     if (!selectedPreset) return;
     const payload = makePayload(type, value, fallbackUrl);
-    const result = await handy.addAction(selectedPreset.id, name, payload);
+    const result = editingId
+      ? await handy.updateAction(selectedPreset.id, editingId, name, payload)
+      : await handy.addAction(selectedPreset.id, name, payload);
     if (result.ok) {
       setName('');
       setValue('');
       setFallbackUrl('');
+      setEditingId(undefined);
     } else {
       Alert.alert('Cannot add action', result.message);
     }
@@ -38,7 +43,7 @@ export default function ActionsScreen() {
       <View style={styles.header}>
         <Text style={styles.eyebrow}>Actions</Text>
         <Text style={styles.title}>Name plus typed JSON</Text>
-        <Text style={styles.copy}>QR actions open an in-app code. Web and deeplink actions open directly after unlock.</Text>
+        <Text style={styles.copy}>QR actions show a code. Text-input actions capture a note and send it to a destination you choose.</Text>
       </View>
 
       {handy.state.presets.length === 0 ? (
@@ -55,7 +60,7 @@ export default function ActionsScreen() {
                 <Pressable
                   key={preset.id}
                   style={preset.id === selectedPreset?.id ? styles.selectedChip : styles.chip}
-                  onPress={() => setSelectedPresetId(preset.id)}>
+                  onPress={() => { setSelectedPresetId(preset.id); setEditingId(undefined); setName(''); setValue(''); setFallbackUrl(''); }}>
                   <Text style={preset.id === selectedPreset?.id ? styles.selectedChipText : styles.chipText}>{preset.name}</Text>
                 </Pressable>
               ))}
@@ -63,14 +68,20 @@ export default function ActionsScreen() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Add action</Text>
+            <Text style={styles.cardTitle}>{editingId ? 'Edit action' : 'Add action'}</Text>
             <TextInput value={name} onChangeText={setName} placeholder="My LinkedIn" placeholderTextColor="#8792a2" style={styles.input} />
             <View style={styles.chips}>
-              {(['qr', 'web', 'deeplink'] as const).map((payloadType) => (
+              {(['qr', 'web', 'deeplink', 'text-input'] as const).map((payloadType) => (
                 <Pressable
                   key={payloadType}
                   style={type === payloadType ? styles.selectedChip : styles.chip}
-                  onPress={() => setType(payloadType)}>
+                  onPress={() => {
+                    setType(payloadType);
+                    if (payloadType === 'text-input' && !value) {
+                      setValue(`${ExpoLinking.createURL('/notes')}?text={text}`);
+                      if (!name) setName('Add Note');
+                    }
+                  }}>
                   <Text style={type === payloadType ? styles.selectedChipText : styles.chipText}>{payloadType}</Text>
                 </Pressable>
               ))}
@@ -80,24 +91,33 @@ export default function ActionsScreen() {
               onChangeText={setValue}
               autoCapitalize="none"
               autoCorrect={false}
-              placeholder={type === 'qr' ? 'QR value or URL' : 'https://example.test or app://target'}
+              placeholder={type === 'qr' ? 'QR value or URL' : type === 'text-input' ? 'app://add-note?text={text}' : 'https://example.test or app://target'}
               placeholderTextColor="#8792a2"
               style={styles.input}
             />
-            {type === 'deeplink' ? (
+            {type === 'text-input' ? <>
+              <Text style={styles.copy}>Use {'{text}'} where the URL should receive your note. Text is URL-encoded automatically.</Text>
+              <Pressable style={styles.secondaryButton} onPress={() => setValue(`${ExpoLinking.createURL('/notes')}?text={text}`)}>
+                <Text style={styles.secondaryButtonText}>Use this app as destination</Text>
+              </Pressable>
+            </> : null}
+            {type === 'deeplink' || type === 'text-input' ? (
               <TextInput
                 value={fallbackUrl}
                 onChangeText={setFallbackUrl}
                 autoCapitalize="none"
                 autoCorrect={false}
-                placeholder="Fallback web URL (optional)"
+                placeholder={type === 'text-input' ? 'Fallback https://…?text={text} (optional)' : 'Fallback web URL (optional)'}
                 placeholderTextColor="#8792a2"
                 style={styles.input}
               />
             ) : null}
             <Pressable style={styles.primaryButton} onPress={addAction}>
-              <Text style={styles.primaryButtonText}>Add action</Text>
+              <Text style={styles.primaryButtonText}>{editingId ? 'Save action' : 'Add action'}</Text>
             </Pressable>
+            {editingId ? <Pressable onPress={() => { setEditingId(undefined); setName(''); setValue(''); setFallbackUrl(''); }}>
+              <Text style={styles.deleteText}>Cancel editing</Text>
+            </Pressable> : null}
           </View>
 
           {selectedPreset?.actions.map((action) => (
@@ -115,11 +135,20 @@ export default function ActionsScreen() {
                       <Text style={styles.secondaryButtonText}>Show QR</Text>
                     </Pressable>
                   </Link>
+                ) : action.payload.type === 'text-input' ? (
+                  <Link href={{ pathname: '/capture', params: { actionId: action.id, presetId: selectedPreset.id } }} asChild>
+                    <Pressable style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Add Note</Text></Pressable>
+                  </Link>
                 ) : (
                   <Pressable style={styles.secondaryButton} onPress={() => void runActionPayload(action.payload)}>
                     <Text style={styles.secondaryButtonText}>Open</Text>
                   </Pressable>
                 )}
+                <Pressable onPress={() => {
+                  setEditingId(action.id); setName(action.name); setType(action.payload.type);
+                  setValue(action.payload.type === 'qr' ? action.payload.value : action.payload.type === 'text-input' ? action.payload.urlTemplate : action.payload.url);
+                  setFallbackUrl(action.payload.type === 'deeplink' ? action.payload.fallbackUrl ?? '' : action.payload.type === 'text-input' ? action.payload.fallbackUrlTemplate ?? '' : '');
+                }}><Text style={styles.chipText}>Edit</Text></Pressable>
                 <Pressable onPress={() => selectedPreset && void handy.deleteAction(selectedPreset.id, action.id)}>
                   <Text style={styles.deleteText}>Delete</Text>
                 </Pressable>
@@ -133,6 +162,7 @@ export default function ActionsScreen() {
 }
 
 function makePayload(type: PayloadType, value: string, fallbackUrl: string): HandyActionPayload {
+  if (type === 'text-input') return { type, urlTemplate: value.trim(), ...(fallbackUrl.trim() ? { fallbackUrlTemplate: fallbackUrl.trim() } : {}) };
   if (type === 'web') return { type, url: value.trim() };
   if (type === 'deeplink') {
     const fallback = fallbackUrl.trim();

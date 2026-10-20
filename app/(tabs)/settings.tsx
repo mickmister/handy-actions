@@ -1,13 +1,27 @@
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Link } from 'expo-router';
 
 import { getNotificationStatus, requestNotificationAccess, syncPresetNotifications } from '@/src/core/handyNotifications';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
+import { enabledPresets, surfaceSettings, type SurfaceSettings } from '@/src/core/handyModel';
 
 export default function SettingsScreen() {
   const handy = useHandyStateContext();
   const [importText, setImportText] = useState('');
   const [status, setStatus] = useState('Tap Check permission.');
+  const [syncing, setSyncing] = useState(false);
+  const surfaces = surfaceSettings(handy.state);
+
+  async function updateSurface(patch: Partial<SurfaceSettings>) {
+    setSyncing(true);
+    try {
+      const next = { ...surfaces, ...patch };
+      await handy.updateSurfaces(next);
+      handy.setMessage(await syncPresetNotifications({ ...handy.state, surfaces: next }));
+    } catch (error) { Alert.alert('Could not update lock screen', String(error)); }
+    finally { setSyncing(false); }
+  }
 
   async function checkPermission() {
     const next = await getNotificationStatus();
@@ -40,6 +54,41 @@ export default function SettingsScreen() {
         <Text style={styles.eyebrow}>Settings</Text>
         <Text style={styles.title}>Local app controls</Text>
         <Text style={styles.copy}>Everything here stays on this device unless you copy the JSON yourself.</Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Lock-screen experiments</Text>
+        <Text style={styles.copy}>Enable either surface, or both to compare them. Changes are saved and applied immediately.</Text>
+        {([
+          ['liveActivities', 'Live Activities', Platform.OS !== 'ios'],
+          ['lockScreenWidgets', 'Lock Screen Widgets', Platform.OS !== 'ios'],
+          ['notifications', 'Preset notification panels', false],
+        ] as const).map(([key, label, unsupported]) => <View key={key} style={styles.settingRow}>
+          <Text style={styles.copy}>{label}{unsupported ? ' (iOS only)' : ''}</Text>
+          <Switch accessibilityLabel={label} value={surfaces[key]} disabled={!handy.loaded || syncing || unsupported}
+            onValueChange={(value) => void updateSurface({ [key]: value })} />
+        </View>)}
+        <Text style={styles.copy}>Note-input notifications remain available even when preset notification panels are off.</Text>
+        {Platform.OS === 'ios' ? <>
+          <Text style={styles.copy}>To add a widget: long-press the Lock Screen → Customize → Lock Screen → Add Widgets → Handy Actions. Choose circular, rectangular, or inline. Turning widgets off shows an inactive tile; remove it in the Lock Screen editor.</Text>
+          <Text style={styles.copy}>Widget preset (must be enabled and contain actions):</Text>
+          <View style={styles.buttonRow}>
+            {[{ id: '', name: 'First enabled preset' }, ...enabledPresets(handy.state)].map((preset) => <Pressable
+              key={preset.id} disabled={syncing || !handy.loaded}
+              style={surfaces.widgetPresetId === preset.id || (!surfaces.widgetPresetId && !preset.id) ? styles.primaryButton : styles.secondaryButton}
+              onPress={() => void updateSurface({ widgetPresetId: preset.id })}>
+              <Text style={styles.secondaryButtonText}>{preset.name}</Text>
+            </Pressable>)}
+          </View>
+          <Text style={styles.copy}>Circular and inline open the first action; rectangular shows two. Live Activities show three plus All actions. iOS controls widget refresh timing and placement. Live Activities expire and must be refreshed.</Text>
+        </> : null}
+        <Text style={styles.copy}>{handy.message}</Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Notes</Text>
+        <Link href="/notes">View notes saved in this app</Link>
+        <Link href="/pending-notes">Recover unsent notes</Link>
       </View>
 
       <View style={styles.card}>
@@ -95,6 +144,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#fff', borderColor: '#e5e9f0', borderRadius: 22, borderWidth: 1, gap: 12, padding: 16 },
   cardTitle: { color: '#111827', fontSize: 18, fontWeight: '800' },
   buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   primaryButton: { alignItems: 'center', backgroundColor: '#38bdf8', borderRadius: 16, minHeight: 48, justifyContent: 'center', paddingHorizontal: 16 },
   primaryButtonText: { color: '#082f49', fontSize: 15, fontWeight: '800' },
   secondaryButton: { alignItems: 'center', backgroundColor: '#e0f2fe', borderRadius: 16, minHeight: 48, justifyContent: 'center', paddingHorizontal: 16 },

@@ -8,6 +8,7 @@ import {
   actionPressId,
   defaultHandyState,
   exportHandyState,
+  findAction,
   importHandyState,
   liveActivityPropsForPreset,
   notificationBodyForPreset,
@@ -16,6 +17,9 @@ import {
   presetIdFromPressId,
   presetPressId,
   validateHandyState,
+  surfaceSettings,
+  textInputUrl,
+  widgetPreset,
   type HandyPreset,
   type HandyState,
 } from '../src/core/handyModel.ts';
@@ -154,4 +158,54 @@ test('notification metadata builds real action press ids instead of body text co
     name: 'LinkedIn',
     payload: { type: 'web', url: 'https://www.linkedin.com/in/example-two' },
   });
+});
+
+test('text destinations preserve note contents and existing URL components', () => {
+  const text = 'Hello & goodbye? #tag 100%\n日本語 😀';
+  const url = textInputUrl('someapp://add-note?workspace=abc&text={text}#editor', text);
+  const parsed = new URL(url);
+  assert.equal(parsed.searchParams.get('text'), text);
+  assert.equal(parsed.searchParams.get('workspace'), 'abc');
+  assert.equal(parsed.hash, '#editor');
+  assert.equal(textInputUrl('someapp://notes/{text}', 'a/b'), 'someapp://notes/a%2Fb');
+  assert.throws(() => textInputUrl('someapp://notes?text={text}', ' \n '), /Enter a note/);
+  for (const invalid of ['someapp://notes', 'https://{text}.example.test', 'javascript://run?text={text}', 'not a url {text}']) {
+    assert.throws(() => textInputUrl(invalid, 'note'), /Invalid text destination/);
+  }
+});
+
+test('text-input actions round trip through storage, export and notification snapshots', () => {
+  const state: HandyState = {
+    presets: [{ id: 'p', name: 'Notes', enabled: true, actions: [{
+      id: 'note', name: 'Add Note', payload: { type: 'text-input', urlTemplate: 'handyactionspreview://notes?text={text}', fallbackUrlTemplate: 'https://example.test/note?body={text}' },
+    }] }],
+    surfaces: { liveActivities: true, lockScreenWidgets: true, notifications: false, widgetPresetId: 'p' },
+  };
+  assert.equal(validateHandyState(state).ok, true);
+  assert.deepEqual(importHandyState(exportHandyState(state)), state);
+  assert.deepEqual(actionFromNotificationRowsData('note', notificationRowsData(state.presets[0])), state.presets[0].actions[0]);
+  const invalid = structuredClone(state);
+  invalid.presets[0].actions[0].payload = { type: 'text-input', urlTemplate: 'app://note', fallbackUrlTemplate: 'app://note?text={text}' };
+  assert.equal(validateHandyState(invalid).ok, false);
+});
+
+test('legacy presets retain surface defaults and widget selection uses an enabled nonempty preset', () => {
+  const legacy = importHandyState('{"presets":[]}');
+  assert.deepEqual(surfaceSettings(legacy), { liveActivities: true, lockScreenWidgets: false, notifications: true });
+  const state: HandyState = {
+    surfaces: { liveActivities: false, lockScreenWidgets: true, notifications: false, widgetPresetId: 'second' },
+    presets: [
+      { id: 'first', name: 'First', enabled: true, actions: [{ id: 'a', name: 'A', payload: { type: 'web', url: 'https://example.test' } }] },
+      { id: 'second', name: 'Second', enabled: true, actions: [{ id: 'b', name: 'B', payload: { type: 'qr', value: 'b' } }] },
+    ],
+  };
+  assert.equal(widgetPreset(state)?.id, 'second');
+  state.presets[1].actions[0].id = 'a';
+  assert.equal(findAction(state, 'a', 'second')?.action.name, 'B');
+  assert.equal(findAction(state, 'a', 'missing'), undefined);
+  state.presets[1].enabled = false;
+  assert.equal(widgetPreset(state)?.id, 'first');
+  state.presets[0].actions = [];
+  assert.equal(widgetPreset(state), undefined);
+  assert.deepEqual(surfaceSettings(state), { liveActivities: false, lockScreenWidgets: true, notifications: false, widgetPresetId: 'second' });
 });
