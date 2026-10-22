@@ -10,6 +10,8 @@ import {
   type HandyState,
 } from './handyModel';
 import HandyActionsLiveActivity from '../liveActivities/HandyActionsLiveActivity';
+import { isLocalNoteAction } from './localNoteDelivery';
+import { nativeNoteInbox } from './nativeNoteInbox';
 
 const LIVE_ACTIVITY_STALE_MS = 7.5 * 60 * 60 * 1000;
 
@@ -32,7 +34,8 @@ export async function syncPresetLiveActivities(state: HandyState): Promise<void>
       title: action.name,
       url: ExpoLinking.createURL('/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: action.payload.type === 'text-input' ? '1' : '0' } }),
       ...(Number.parseInt(String(Platform.Version), 10) >= 17
-        ? { captureTarget: liveActivityCaptureTarget(preset.id, action) } : {}),
+        ? { captureTarget: liveActivityCaptureTarget(preset.id, action,
+          !!nativeNoteInbox && isLocalNoteAction(action, ExpoLinking.createURL('/notes'))) } : {}),
     }));
     HandyActionsLiveActivity.start(props, openUrl, staleDate);
   }

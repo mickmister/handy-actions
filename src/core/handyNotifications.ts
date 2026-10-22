@@ -7,6 +7,7 @@ import notifee, {
   type Event,
 } from '@notifee/react-native';
 import { Linking, Platform } from 'react-native';
+import * as ExpoLinking from 'expo-linking';
 
 import {
   actionFromNotificationRowsData,
@@ -30,12 +31,18 @@ import { loadHandyState } from './handyStore';
 import { syncPresetLiveActivities } from './handyLiveActivities';
 import { syncLockScreenWidget } from './handyWidgets';
 import { pendingNotes, queueNote } from './handyNotes';
+import { isLocalNoteAction, LOCAL_INPUT_CATEGORY, LOCAL_RECOVERY_CATEGORY, LOCAL_RETRY_PRESS } from './localNoteDelivery';
+import { nativeNoteInbox } from './nativeNoteInbox';
 
 const CHANNEL_ID = 'handy-actions';
 const INPUT_CATEGORY = 'handy-text-input';
 const INPUT_PRESS = 'handy-input-submit';
 const handledSubmissions = new Set<string>();
 let syncQueue: Promise<unknown> = Promise.resolve();
+
+function savesLocallyInNative(action: Pick<HandyAction, 'payload'>): boolean {
+  return Platform.OS === 'ios' && !!nativeNoteInbox && isLocalNoteAction(action, ExpoLinking.createURL('/notes'));
+}
 
 let currentState: HandyState = { presets: [] };
 let pressHandler: ((target: NotificationPressTarget) => void) | undefined;
@@ -104,10 +111,19 @@ async function configureCategories(state: HandyState): Promise<void> {
   await notifee.setNotificationCategories([
     { id: INPUT_CATEGORY, actions: [{ id: INPUT_PRESS, title: 'Add Note', foreground: true,
       input: { placeholderText: 'Write a note…', buttonText: 'Send' } }] },
+    ...(nativeNoteInbox ? [
+      { id: LOCAL_INPUT_CATEGORY, actions: [{ id: INPUT_PRESS, title: 'Add Note', foreground: false,
+        input: { placeholderText: 'Write a note…', buttonText: 'Save' } }] },
+      { id: LOCAL_RECOVERY_CATEGORY, actions: [
+        { id: LOCAL_RETRY_PRESS, title: 'Retry save', foreground: false },
+        { id: INPUT_PRESS, title: 'Edit note', foreground: false,
+          input: { placeholderText: 'Write a replacement note…', buttonText: 'Save' } },
+      ] },
+    ] : []),
     ...enabledPresets(state).map((preset) => ({
       id: categoryIdForPreset(preset.id),
       actions: actionNotificationRows(preset).slice(0, 2).map((row) => ({
-        id: actionPressId(row.id), title: row.title, foreground: true,
+        id: actionPressId(row.id), title: row.title, foreground: !savesLocallyInNative(row),
         ...(row.payload.type === 'text-input' ? { input: { placeholderText: 'Write a note…', buttonText: 'Send' } } : {}),
       })),
     })),
@@ -142,7 +158,8 @@ async function syncSurfaces(state: HandyState): Promise<string> {
       id: notificationIdForPreset(preset),
       title: preset.name,
       body: notificationBodyForPreset(preset),
-      data: { presetId: preset.id, actions: notificationRowsData(preset), submissionId: makeId('submission') },
+      data: { presetId: preset.id, actions: notificationRowsData(preset), submissionId: makeId('submission'),
+        localNoteActionIds: JSON.stringify(rows.filter(savesLocallyInNative).map((row) => row.id)) },
       android: {
         channelId: CHANNEL_ID,
         ongoing: true,
@@ -300,11 +317,14 @@ export async function showTextInputNotification(action: HandyAction, presetId?: 
   if (status.permission === 'denied') throw new Error('Notifications are disabled. You can write the note here instead.');
   await configureCategories(await loadHandyState());
   const submissionId = makeId('submission');
+  const nativeLocal = savesLocallyInNative(action);
   await notifee.displayNotification({
     id: `handy-input-${submissionId}`, title: action.name,
     body: 'Expand this notification and select Add Note to type. You can also write in the app.',
-    data: { captureActionId: action.id, submissionId, ...(presetId ? { presetId } : {}), actions: JSON.stringify([{ id: action.id, title: action.name, payload: action.payload }]) },
-    ios: { categoryId: INPUT_CATEGORY, foregroundPresentationOptions: { banner: true, list: true, sound: false } },
+    data: { captureActionId: action.id, submissionId, ...(presetId ? { presetId } : {}),
+      ...(nativeLocal ? { localNoteDestination: '1' } : {}),
+      actions: JSON.stringify([{ id: action.id, title: action.name, payload: action.payload }]) },
+    ios: { categoryId: nativeLocal ? LOCAL_INPUT_CATEGORY : INPUT_CATEGORY, foregroundPresentationOptions: { banner: true, list: true, sound: false } },
     android: { channelId: CHANNEL_ID, pressAction: { id: 'capture', launchActivity: 'default' },
       actions: [{ title: 'Add Note', pressAction: { id: INPUT_PRESS, launchActivity: 'default' }, input: { placeholder: 'Write a note…' } }] },
   });

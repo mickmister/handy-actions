@@ -5,7 +5,8 @@ import { Linking, Pressable, ScrollView, Text } from 'react-native';
 
 import { NoteComposer, noteStyles as styles } from '@/components/NoteComposer';
 import { findAction, textInputUrl, type HandyAction } from '@/src/core/handyModel';
-import { completeNote, pendingNotes, queueNote } from '@/src/core/handyNotes';
+import { completeNote, pendingNotes, queueNote, saveNote } from '@/src/core/handyNotes';
+import { isLocalNoteAction } from '@/src/core/localNoteDelivery';
 import { runActionPayload, showTextInputNotification } from '@/src/core/handyNotifications';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 
@@ -36,7 +37,14 @@ export default function CaptureScreen() {
       activeId.current = pending.id;
       const url = textInputUrl(target.payload.urlTemplate, value);
       const localNotesUrl = ExpoLinking.createURL('/notes');
-      if (url.startsWith(`${localNotesUrl}?`)) {
+      if (isLocalNoteAction(target, localNotesUrl)) {
+        await saveNote(value, pending.id);
+        await completeNote(pending.id);
+        activeId.current = undefined;
+        setText('');
+        setMessage('Note saved on this device.');
+      } else if (url.startsWith(`${localNotesUrl}?`)) {
+        // Preserve existing foreground semantics for custom text transforms.
         const destination = new URL(url);
         destination.searchParams.set('submissionId', pending.id);
         await Linking.openURL(destination.toString());

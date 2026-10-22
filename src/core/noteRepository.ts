@@ -28,12 +28,12 @@ export function createNoteRepository(storage: NoteStorage) {
   return {
     loadNotes,
     noteCompleted,
-    saveNote(text: string, id = makeId('note')): Promise<void> {
+    saveNote(text: string, id = makeId('note'), createdAt = new Date().toISOString()): Promise<void> {
       return serialized(async () => {
         if (!text.trim()) throw new Error('Enter a note first.');
         const notes = await loadNotes();
         if (notes.some((note) => note.id === id)) return;
-        await storage.setItem(NOTES_KEY, JSON.stringify([{ id, text, createdAt: new Date().toISOString() }, ...notes]));
+        await storage.setItem(NOTES_KEY, JSON.stringify([{ id, text, createdAt }, ...notes]));
       });
     },
     queueNote(action: HandyAction, text: string, id = makeId('submission')): Promise<PendingNote | undefined> {

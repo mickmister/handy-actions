@@ -1,5 +1,50 @@
+diff --git a/ios/HandyNoteInbox.swift b/ios/HandyNoteInbox.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..b672a0c4cf60367976f03e0ca7bcde441371cfd6
+--- /dev/null
++++ b/ios/HandyNoteInbox.swift
+@@ -0,0 +1,39 @@
++import Foundation
++import CryptoKit
++
++// Written by the Notifee native response callback before notification completion.
++// Read/ack are separate so React storage failures never discard the native copy.
++enum HandyNoteInbox {
++  private static func directory() throws -> URL {
++    try FileManager.default.url(
++      for: .applicationSupportDirectory, in: .userDomainMask,
++      appropriateFor: nil, create: true
++    ).appendingPathComponent("HandyActionsNoteInbox", isDirectory: true)
++  }
++
++  static func read() throws -> [[String: Any]] {
++    let folder = try directory()
++    guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
++    let files = try FileManager.default.contentsOfDirectory(
++      at: folder, includingPropertiesForKeys: nil
++    ).filter { $0.pathExtension == "json" }
++    return try files.map { file in
++      let data = try Data(contentsOf: file)
++      guard let note = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
++        throw NSError(domain: "HandyNoteInbox", code: 1, userInfo: [
++          NSLocalizedDescriptionKey: "A captured note could not be read; its file was retained."
++        ])
++      }
++      return note
++    }.sorted { ($0["createdAt"] as? String ?? "") < ($1["createdAt"] as? String ?? "") }
++  }
++
++  static func acknowledge(id: String) throws {
++    // Must match CommonCrypto's SHA256 UTF-8 filename in the Notifee patch.
++    let digest = SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
++    let file = try directory().appendingPathComponent("\(digest).json")
++    if FileManager.default.fileExists(atPath: file.path) {
++      try FileManager.default.removeItem(at: file)
++    }
++  }
++}
 diff --git a/ios/Widgets/AppIntent.swift b/ios/Widgets/AppIntent.swift
-index 972fa4f190d5da8f961218bcbe2436964ac34acf..d316a08c012847ff21a68d0a5acf768195452113 100644
+index 972fa4f190d5da8f961218bcbe2436964ac34acf..acb44e1e04cf1262b30b684b017af70b4a0c7091 100644
 --- a/ios/Widgets/AppIntent.swift
 +++ b/ios/Widgets/AppIntent.swift
 @@ -1,5 +1,6 @@
@@ -29,7 +74,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..d316a08c012847ff21a68d0a5acf7681
      WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
        "source": source as Any,
        "target": target as Any,
-@@ -128,3 +135,83 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+@@ -128,3 +135,94 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
      return .result()
    }
  }
@@ -44,6 +89,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..d316a08c012847ff21a68d0a5acf7681
 +    let title: String
 +    // Same snapshot consumed by actionFromNotificationRowsData in the host app.
 +    let actions: String
++    let localSave: Bool?
 +  }
 +
 +  static func post(target: String?) async throws -> Bool {
@@ -72,37 +118,47 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..d316a08c012847ff21a68d0a5acf7681
 +      ])
 +    }
 +
-+    // Keep other categories intact. Reply still foregrounds for the existing
-+    // durable queue/deep-link delivery; only the capture trigger is UI-free.
++    // Local replies are persisted by Notifee's native response callback. App
++    // deep-link destinations retain foreground handoff; never switch silently.
++    let localSave = capture.localSave == true
++    let selectedCategory = localSave ? "handy-text-input-local-v1" : categoryID
 +    let reply = UNTextInputNotificationAction(
-+      identifier: "handy-input-submit", title: "Add Note", options: [.foreground],
-+      textInputButtonTitle: "Send", textInputPlaceholder: "Write a note…"
++      identifier: "handy-input-submit", title: "Add Note", options: localSave ? [] : [.foreground],
++      textInputButtonTitle: localSave ? "Save" : "Send", textInputPlaceholder: "Write a note…"
 +    )
 +    let category = UNNotificationCategory(
-+      identifier: categoryID, actions: [reply], intentIdentifiers: [], options: []
++      identifier: selectedCategory, actions: [reply], intentIdentifiers: [], options: []
 +    )
 +    var categories = await center.notificationCategories()
-+    categories = Set(categories.filter { $0.identifier != categoryID })
++    categories = Set(categories.filter { $0.identifier != selectedCategory })
 +    categories.insert(category)
++    if localSave {
++      let retry = UNNotificationAction(identifier: "handy-local-retry", title: "Retry save", options: [])
++      categories = Set(categories.filter { $0.identifier != "handy-text-input-local-recovery-v1" })
++      categories.insert(UNNotificationCategory(
++        identifier: "handy-text-input-local-recovery-v1", actions: [retry, reply], intentIdentifiers: [], options: []
++      ))
++    }
 +    center.setNotificationCategories(categories)
 +
 +    let submissionID = UUID().uuidString
 +    let notificationID = "handy-input-\(submissionID)"
 +    let body = "Expand this notification and select Add Note to type."
-+    let data: [String: String] = [
++    var data: [String: String] = [
 +      "captureActionId": capture.actionId, "presetId": capture.presetId,
 +      "submissionId": submissionID, "actions": capture.actions
 +    ]
++    if localSave { data["localNoteDestination"] = "1" }
 +    let notification: [String: Any] = [
 +      "id": notificationID, "title": capture.title, "body": body, "data": data,
-+      "ios": ["categoryId": categoryID, "foregroundPresentationOptions": [
++      "ios": ["categoryId": selectedCategory, "foregroundPresentationOptions": [
 +        "banner": true, "list": true, "sound": false, "badge": false
 +      ]]
 +    ]
 +    let content = UNMutableNotificationContent()
 +    content.title = capture.title
 +    content.body = body
-+    content.categoryIdentifier = categoryID
++    content.categoryIdentifier = selectedCategory
 +    // Notifee 9.1.8 reads this envelope on response/cold start. This lets the
 +    // existing reply handler retain its snapshot, pending queue and dedupe.
 +    content.userInfo = data.reduce(into: [String: Any]()) { $0[$1.key] = $1.value }
@@ -113,3 +169,22 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..d316a08c012847ff21a68d0a5acf7681
 +    return true
 +  }
 +}
+diff --git a/ios/WidgetsModule.swift b/ios/WidgetsModule.swift
+index b1b4295e22726e6fe501aa5e514b56061dea57a1..69058660d8e634d7e5a35c49c960836ee9d03e46 100644
+--- a/ios/WidgetsModule.swift
++++ b/ios/WidgetsModule.swift
+@@ -17,6 +17,14 @@ public final class WidgetsModule: Module {
+ 
+     Events(onPushToStartTokenReceived, onTokenReceived, onUserInteraction)
+ 
++    AsyncFunction("readHandyNoteInbox") { () -> [[String: Any]] in
++      try HandyNoteInbox.read()
++    }
++
++    AsyncFunction("acknowledgeHandyNote") { (id: String) in
++      try HandyNoteInbox.acknowledge(id: id)
++    }
++
+     OnStartObserving(onUserInteraction) {
+       NotificationCenter.default.addObserver(
+         self,

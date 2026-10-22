@@ -1,0 +1,162 @@
+diff --git a/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m b/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m
+index beaa3600a9fc9edb0fed561c18f82fa57c8ea3ac..5ff3062a138f956faa241d4e08d90df22f0a747f 100644
+--- a/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m
++++ b/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m
+@@ -19,6 +19,146 @@
+ 
+ #import "NotifeeCoreDelegateHolder.h"
+ #import "NotifeeCoreUtil.h"
++#import <CommonCrypto/CommonDigest.h>
++
++// Handy Actions local replies are persisted synchronously in native code. They
++// never wait for a React bridge, navigate, or launch a deep link. Keep the wire
++// IDs and inbox path in sync with the pinned ExpoWidgets patch.
++static BOOL HandyHandleLocalNoteResponse(UNUserNotificationCenter *center,
++                                        UNNotificationResponse *response,
++                                        NSDictionary *notification,
++                                        void (^completionHandler)(void)) {
++  NSDictionary *data = notification[@"data"];
++  if (![data isKindOfClass:NSDictionary.class]) return NO;
++
++  NSString *press = response.actionIdentifier;
++  BOOL retry = [press isEqualToString:@"handy-local-retry"];
++  NSString *actionId = nil;
++  if ([press isEqualToString:@"handy-input-submit"] || retry) {
++    if (![data[@"localNoteDestination"] isEqual:@"1"]) return NO;
++    actionId = data[@"captureActionId"];
++  } else if ([press hasPrefix:@"handy-action:"]) {
++    actionId = [press substringFromIndex:@"handy-action:".length];
++    NSString *encodedIds = data[@"localNoteActionIds"];
++    if (![encodedIds isKindOfClass:NSString.class]) return NO;
++    id ids = [NSJSONSerialization JSONObjectWithData:[encodedIds dataUsingEncoding:NSUTF8StringEncoding]
++                                            options:0 error:nil];
++    if (![ids isKindOfClass:NSArray.class] || ![ids containsObject:actionId]) return NO;
++  } else {
++    return NO;
++  }
++  if (![actionId isKindOfClass:NSString.class] || actionId.length == 0) return NO;
++
++  NSString *text = nil;
++  if ([response isKindOfClass:UNTextInputNotificationResponse.class]) {
++    text = ((UNTextInputNotificationResponse *)response).userText;
++  } else if (retry) {
++    text = data[@"localNoteRecoveryText"];
++  }
++  if (![text isKindOfClass:NSString.class] ||
++      [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length == 0) {
++    completionHandler();
++    return YES;
++  }
++
++  NSString *submission = data[@"submissionId"];
++  if (![submission isKindOfClass:NSString.class] || submission.length == 0) {
++    submission = response.notification.request.identifier;
++  }
++  NSString *noteId = [NSString stringWithFormat:@"%@-%@", submission, actionId];
++  BOOL isPresetPanel = [response.notification.request.identifier hasPrefix:@"handy-preset-"];
++  NSDictionary *panelSnapshot = notification;
++  NSString *encodedPanel = data[@"localNotePanelSnapshot"];
++  if (isPresetPanel && [encodedPanel isKindOfClass:NSString.class]) {
++    id decoded = [NSJSONSerialization JSONObjectWithData:[encodedPanel dataUsingEncoding:NSUTF8StringEncoding]
++                                                 options:0 error:nil];
++    if ([decoded isKindOfClass:NSDictionary.class]) panelSnapshot = decoded;
++  }
++  NSError *error = nil;
++  @synchronized(NotifeeCoreUNUserNotificationCenter.class) {
++    NSFileManager *files = NSFileManager.defaultManager;
++    NSURL *support = [files URLForDirectory:NSApplicationSupportDirectory inDomain:NSUserDomainMask
++                        appropriateForURL:nil create:YES error:&error];
++    NSURL *folder = [support URLByAppendingPathComponent:@"HandyActionsNoteInbox" isDirectory:YES];
++    if (folder && [files createDirectoryAtURL:folder withIntermediateDirectories:YES
++                                  attributes:@{NSFileProtectionKey: NSFileProtectionCompleteUntilFirstUserAuthentication}
++                                       error:&error]) {
++      NSData *idData = [noteId dataUsingEncoding:NSUTF8StringEncoding];
++      unsigned char digest[CC_SHA256_DIGEST_LENGTH];
++      CC_SHA256(idData.bytes, (CC_LONG)idData.length, digest);
++      NSMutableString *filename = [NSMutableString string];
++      for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) [filename appendFormat:@"%02x", digest[i]];
++      NSURL *file = [folder URLByAppendingPathComponent:[filename stringByAppendingString:@".json"]];
++      // Duplicate callbacks must not overwrite the first durable copy.
++      if (![files fileExistsAtPath:file.path]) {
++        NSISO8601DateFormatter *formatter = [[NSISO8601DateFormatter alloc] init];
++        formatter.formatOptions = NSISO8601DateFormatWithInternetDateTime | NSISO8601DateFormatWithFractionalSeconds;
++        NSData *encoded = [NSJSONSerialization dataWithJSONObject:@{
++          @"id": noteId, @"text": text, @"createdAt": [formatter stringFromDate:NSDate.date]
++        } options:0 error:&error];
++        if (encoded) {
++          [encoded writeToURL:file options:NSDataWritingAtomic | NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication
++                        error:&error];
++        }
++      }
++    }
++  }
++
++  UNMutableNotificationContent *feedback = [[UNMutableNotificationContent alloc] init];
++  if (error) {
++    // Preserve failed text in the OS notification store for an explicit native
++    // retry, without displaying it on the Lock Screen or launching the app.
++    feedback.title = @"Note not saved";
++    feedback.body = @"Expand and choose Retry save. Your text is kept in this notification.";
++    feedback.categoryIdentifier = @"handy-text-input-local-recovery-v1";
++    NSMutableDictionary *recoveryData = [data mutableCopy];
++    recoveryData[@"captureActionId"] = actionId;
++    recoveryData[@"localNoteDestination"] = @"1";
++    recoveryData[@"localNoteRecoveryText"] = text;
++    if (isPresetPanel && !encodedPanel) {
++      NSData *encoded = [NSJSONSerialization dataWithJSONObject:panelSnapshot options:0 error:nil];
++      if (encoded) recoveryData[@"localNotePanelSnapshot"] = [[NSString alloc] initWithData:encoded encoding:NSUTF8StringEncoding];
++    }
++    NSMutableDictionary *recovery = [notification mutableCopy];
++    recovery[@"data"] = recoveryData;
++    recovery[@"title"] = feedback.title;
++    recovery[@"body"] = feedback.body;
++    recovery[@"ios"] = @{@"categoryId": feedback.categoryIdentifier};
++    feedback.userInfo = @{kNotifeeUserInfoNotification: recovery};
++  } else {
++    feedback.title = @"Note saved";
++    feedback.body = @"Saved on this device. View it later in Handy Actions.";
++  }
++  // Keep the preset launcher reusable. A new per-panel submission token permits
++  // another deliberate reply, while duplicate callbacks retain the old token.
++  if (isPresetPanel && !error) {
++    NSMutableDictionary *next = [panelSnapshot mutableCopy];
++    NSMutableDictionary *nextData = [panelSnapshot[@"data"] mutableCopy];
++    nextData[@"submissionId"] = NSUUID.UUID.UUIDString;
++    next[@"data"] = nextData;
++    UNMutableNotificationContent *panel = [[UNMutableNotificationContent alloc] init];
++    panel.title = next[@"title"] ?: @"Handy Actions";
++    panel.body = next[@"body"] ?: @"Expand for actions.";
++    panel.categoryIdentifier = next[@"ios"][@"categoryId"] ?: @"";
++    panel.userInfo = @{kNotifeeUserInfoNotification: next};
++    [center addNotificationRequest:[UNNotificationRequest requestWithIdentifier:response.notification.request.identifier
++                                                                       content:panel trigger:nil]
++             withCompletionHandler:^(NSError *_Nullable panelError) {
++      [center addNotificationRequest:[UNNotificationRequest requestWithIdentifier:@"handy-local-note-result"
++                                                                         content:feedback trigger:nil]
++               withCompletionHandler:^(NSError *_Nullable feedbackError) { completionHandler(); }];
++    }];
++    return YES;
++  }
++  UNNotificationRequest *result = [UNNotificationRequest requestWithIdentifier:response.notification.request.identifier
++                                                                     content:feedback trigger:nil];
++  [center addNotificationRequest:result withCompletionHandler:^(NSError *_Nullable feedbackError) {
++    // Storage success is independent of notification presentation. Do not log
++    // note text or request payloads even if presentation fails.
++    completionHandler();
++  }];
++  return YES;
++}
+ 
+ @implementation NotifeeCoreUNUserNotificationCenter
+ 
+@@ -178,6 +318,10 @@ struct {
+   NSDictionary *notifeeNotification =
+       response.notification.request.content.userInfo[kNotifeeUserInfoNotification];
+ 
++  if (HandyHandleLocalNoteResponse(center, response, notifeeNotification, completionHandler)) {
++    return;
++  }
++
+   _notificationOpenedAppID = notifeeNotification[@"id"];
+ 
+   // handle notification outside of notifee
