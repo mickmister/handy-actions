@@ -1,0 +1,115 @@
+diff --git a/ios/Widgets/AppIntent.swift b/ios/Widgets/AppIntent.swift
+index 972fa4f190d5da8f961218bcbe2436964ac34acf..d316a08c012847ff21a68d0a5acf768195452113 100644
+--- a/ios/Widgets/AppIntent.swift
++++ b/ios/Widgets/AppIntent.swift
+@@ -1,5 +1,6 @@
+ import AppIntents
+ import WidgetKit
++import UserNotifications
+ 
+ struct WidgetReload: AppIntent {
+   // title is not used for non-discoverable intents, but it is required
+@@ -105,6 +106,7 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+   // title is not used for non-discoverable intents, but it is required
+   static var title: LocalizedStringResource = "User Interaction"
+   static var isDiscoverable: Bool = false
++  static var openAppWhenRun: Bool = false
+ 
+   @Parameter(title: "source")
+   var source: String?
+@@ -119,6 +121,11 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+   }
+ 
+   func perform() async throws -> some IntentResult {
++    // Handy Actions handles capture natively: no React runtime or foreground UI.
++    // Other Expo button targets retain their original interaction behavior.
++    if try await HandyNoteCapture.post(target: target) {
++      return .result()
++    }
+     WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
+       "source": source as Any,
+       "target": target as Any,
+@@ -128,3 +135,83 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+     return .result()
+   }
+ }
++
++private enum HandyNoteCapture {
++  private static let prefix = "handy-note-capture-v1:"
++  private static let categoryID = "handy-text-input"
++
++  private struct Capture: Decodable {
++    let actionId: String
++    let presetId: String
++    let title: String
++    // Same snapshot consumed by actionFromNotificationRowsData in the host app.
++    let actions: String
++  }
++
++  static func post(target: String?) async throws -> Bool {
++    guard let target, target.hasPrefix(prefix) else { return false }
++    let capture = try JSONDecoder().decode(
++      Capture.self, from: Data(target.dropFirst(prefix.count).utf8)
++    )
++    guard !capture.actionId.isEmpty, !capture.presetId.isEmpty,
++          let rowsData = capture.actions.data(using: .utf8),
++          let rows = try JSONSerialization.jsonObject(with: rowsData) as? [[String: Any]],
++          let row = rows.first, row["id"] as? String == capture.actionId,
++          let payload = row["payload"] as? [String: Any],
++          payload["type"] as? String == "text-input" else {
++      throw NSError(domain: "HandyNoteCapture", code: 1, userInfo: [
++        NSLocalizedDescriptionKey: "Refresh Handy Actions to rebuild this note action."
++      ])
++    }
++
++    let center = UNUserNotificationCenter.current()
++    let settings = await center.notificationSettings()
++    guard settings.authorizationStatus == .authorized ||
++          settings.authorizationStatus == .provisional else {
++      // Never prompt or open the app implicitly from a Lock Screen button.
++      throw NSError(domain: "HandyNoteCapture", code: 2, userInfo: [
++        NSLocalizedDescriptionKey: "Allow notifications in Settings, then try Add Note again."
++      ])
++    }
++
++    // Keep other categories intact. Reply still foregrounds for the existing
++    // durable queue/deep-link delivery; only the capture trigger is UI-free.
++    let reply = UNTextInputNotificationAction(
++      identifier: "handy-input-submit", title: "Add Note", options: [.foreground],
++      textInputButtonTitle: "Send", textInputPlaceholder: "Write a note…"
++    )
++    let category = UNNotificationCategory(
++      identifier: categoryID, actions: [reply], intentIdentifiers: [], options: []
++    )
++    var categories = await center.notificationCategories()
++    categories = Set(categories.filter { $0.identifier != categoryID })
++    categories.insert(category)
++    center.setNotificationCategories(categories)
++
++    let submissionID = UUID().uuidString
++    let notificationID = "handy-input-\(submissionID)"
++    let body = "Expand this notification and select Add Note to type."
++    let data: [String: String] = [
++      "captureActionId": capture.actionId, "presetId": capture.presetId,
++      "submissionId": submissionID, "actions": capture.actions
++    ]
++    let notification: [String: Any] = [
++      "id": notificationID, "title": capture.title, "body": body, "data": data,
++      "ios": ["categoryId": categoryID, "foregroundPresentationOptions": [
++        "banner": true, "list": true, "sound": false, "badge": false
++      ]]
++    ]
++    let content = UNMutableNotificationContent()
++    content.title = capture.title
++    content.body = body
++    content.categoryIdentifier = categoryID
++    // Notifee 9.1.8 reads this envelope on response/cold start. This lets the
++    // existing reply handler retain its snapshot, pending queue and dedupe.
++    content.userInfo = data.reduce(into: [String: Any]()) { $0[$1.key] = $1.value }
++    content.userInfo["__notifee_notification"] = notification
++    try await center.add(UNNotificationRequest(
++      identifier: notificationID, content: content, trigger: nil
++    ))
++    return true
++  }
++}

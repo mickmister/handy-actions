@@ -11,6 +11,7 @@ import {
   findAction,
   importHandyState,
   liveActivityPropsForPreset,
+  liveActivityCaptureTarget,
   notificationBodyForPreset,
   notificationIdForPreset,
   notificationRowsData,
@@ -27,6 +28,23 @@ import {
 test('default state starts local and empty', () => {
   const state = defaultHandyState();
   assert.deepEqual(state, { presets: [] });
+});
+
+test('native capture target preserves scoped destination snapshot and round trips through reply data', () => {
+  const action = {
+    id: 'note', name: 'Add "café" 📝',
+    payload: { type: 'text-input' as const, urlTemplate: 'otherapp://note?text={text}&source=lock' },
+  };
+  const target = liveActivityCaptureTarget('preset-b', action)!;
+  const capture = JSON.parse(target.slice('handy-note-capture-v1:'.length));
+  assert.equal(capture.presetId, 'preset-b');
+  assert.equal(capture.title, action.name);
+  // This is the same path used by the existing Notifee reply handler on cold start.
+  assert.deepEqual(actionFromNotificationRowsData(capture.actionId, capture.actions), action);
+  action.payload.urlTemplate = 'changed://destination?text={text}';
+  assert.equal(actionFromNotificationRowsData(capture.actionId, capture.actions)?.payload.type, 'text-input');
+  assert.equal(JSON.parse(capture.actions)[0].payload.urlTemplate, 'otherapp://note?text={text}&source=lock');
+  assert.equal(liveActivityCaptureTarget('preset-a', { id: 'qr', name: 'QR', payload: { type: 'qr', value: 'abc' } }), undefined);
 });
 
 test('live activity props summarize the preset without app runtime state', () => {

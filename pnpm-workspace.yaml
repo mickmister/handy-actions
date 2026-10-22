@@ -1,3 +1,5 @@
 allowBuilds:
   dtrace-provider: false
   protobufjs: false
+patchedDependencies:
+  expo-widgets@57.0.22: patches/expo-widgets@57.0.22.patch

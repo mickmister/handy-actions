@@ -1,8 +1,10 @@
 import * as ExpoLinking from 'expo-linking';
+import { Platform } from 'react-native';
 
 import {
   enabledPresets,
   liveActivityPropsForPreset,
+  liveActivityCaptureTarget,
   surfaceSettings,
   type HandyActionsLiveActivityProps,
   type HandyState,
@@ -29,6 +31,8 @@ export async function syncPresetLiveActivities(state: HandyState): Promise<void>
     props.actionLinks = preset.actions.slice(0, 3).map((action) => ({
       title: action.name,
       url: ExpoLinking.createURL('/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: action.payload.type === 'text-input' ? '1' : '0' } }),
+      ...(Number.parseInt(String(Platform.Version), 10) >= 17
+        ? { captureTarget: liveActivityCaptureTarget(preset.id, action) } : {}),
     }));
     HandyActionsLiveActivity.start(props, openUrl, staleDate);
   }

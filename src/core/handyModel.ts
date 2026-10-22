@@ -68,7 +68,7 @@ export type HandyActionsLiveActivityProps = {
   thirdAction: string;
   updatedAt: string;
   openUrl: string;
-  actionLinks?: { title: string; url: string }[];
+  actionLinks?: { title: string; url: string; captureTarget?: string }[];
 };
 
 export const ACTION_PRESS_PREFIX = 'handy-action:';
@@ -203,6 +203,18 @@ export function actionNotificationRows(preset: HandyPreset): NotificationActionR
     title: action.name,
     payload: action.payload,
   }));
+}
+
+// Versioned wire contract with the native intent in patches/expo-widgets@57.0.22.patch.
+// Carry the destination snapshot so posting does not depend on React or async storage.
+export function liveActivityCaptureTarget(presetId: string, action: HandyAction): string | undefined {
+  if (action.payload.type !== 'text-input') return undefined;
+  return `handy-note-capture-v1:${JSON.stringify({
+    actionId: action.id,
+    presetId,
+    title: action.name,
+    actions: JSON.stringify([{ id: action.id, title: action.name, payload: action.payload }]),
+  })}`;
 }
 
 export function actionPressId(actionId: string): string {
