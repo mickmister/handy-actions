@@ -87,7 +87,6 @@ test('validates typed action payloads', () => {
             payload: {
               type: 'deeplink',
               url: 'googledocs://document/d/abc',
-              fallbackUrl: 'https://docs.google.com/document/d/abc',
             },
           },
           { id: 'site', name: 'Website', payload: { type: 'web', url: 'https://example.test' } },
@@ -195,7 +194,7 @@ test('text destinations preserve note contents and existing URL components', () 
 test('text-input actions round trip through storage, export and notification snapshots', () => {
   const state: HandyState = {
     presets: [{ id: 'p', name: 'Notes', enabled: true, actions: [{
-      id: 'note', name: 'Add Note', payload: { type: 'text-input', urlTemplate: 'handyactionspreview://notes?text={text}', fallbackUrlTemplate: 'https://example.test/note?body={text}' },
+      id: 'note', name: 'Add Note', payload: { type: 'text-input', urlTemplate: 'handyactionspreview://notes?text={text}' },
     }] }],
     surfaces: { liveActivities: true, lockScreenWidgets: true, notifications: false, widgetPresetId: 'p' },
   };
@@ -203,7 +202,7 @@ test('text-input actions round trip through storage, export and notification sna
   assert.deepEqual(importHandyState(exportHandyState(state)), state);
   assert.deepEqual(actionFromNotificationRowsData('note', notificationRowsData(state.presets[0])), state.presets[0].actions[0]);
   const invalid = structuredClone(state);
-  invalid.presets[0].actions[0].payload = { type: 'text-input', urlTemplate: 'app://note', fallbackUrlTemplate: 'app://note?text={text}' };
+  invalid.presets[0].actions[0].payload = { type: 'text-input', urlTemplate: 'app://note' };
   assert.equal(validateHandyState(invalid).ok, false);
 });
 
@@ -226,4 +225,25 @@ test('legacy presets retain surface defaults and widget selection uses an enable
   state.presets[0].actions = [];
   assert.equal(widgetPreset(state), undefined);
   assert.deepEqual(surfaceSettings(state), { liveActivities: false, lockScreenWidgets: true, notifications: false, widgetPresetId: 'second' });
+});
+
+test('legacy imports disable fallbacks and remote action exports contain references only',()=>{
+  const legacy=importHandyState(JSON.stringify({presets:[{id:'p',name:'P',enabled:false,actions:[
+    {id:'deep',name:'Deep',payload:{type:'deeplink',url:'app://target',fallbackUrl:'https://legacy.test'}},
+    {id:'input',name:'Input',payload:{type:'text-input',urlTemplate:'app://target?text={text}',fallbackUrlTemplate:'https://legacy.test?text={text}'}},
+  ]}]}));
+  assert.equal(exportHandyState(legacy).includes('fallback'),false);
+  assert.deepEqual(legacy.presets[0].actions[0].payload,{type:'deeplink',url:'app://target'});
+  const state:HandyState={theme:'paper',presets:[{id:'p',name:'P',enabled:true,actions:[
+    {id:'http',name:'HTTP',payload:{type:'http',originId:'local-origin',path:'/api',method:'POST',bodyFormat:'json',body:'{"text":"{text}"}',captureText:true}},
+    {id:'agent',name:'Agent',payload:{type:'vd-agent',originId:'local-origin',prefix:'new project',session:{id:'s',workspaceId:'w',label:'Intake · CLAUDE_CODE',executor:'CLAUDE_CODE'}}},
+  ]}]};
+  assert.deepEqual(importHandyState(exportHandyState(state)),state);
+  for(const action of state.presets[0].actions) {
+    const target=liveActivityCaptureTarget('p',action,false,true)!;
+    const wire=JSON.parse(target.slice('handy-note-capture-v1:'.length));
+    assert.equal(wire.backgroundRequest,true);
+    assert.deepEqual(actionFromNotificationRowsData(action.id,wire.actions),action);
+    assert.equal(target.includes('Authorization'),false);
+  }
 });

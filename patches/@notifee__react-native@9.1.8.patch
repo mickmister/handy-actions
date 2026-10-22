@@ -1,12 +1,18 @@
 diff --git a/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m b/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m
-index beaa3600a9fc9edb0fed561c18f82fa57c8ea3ac..5ff3062a138f956faa241d4e08d90df22f0a747f 100644
+index beaa3600a9fc9edb0fed561c18f82fa57c8ea3ac..ae71eddb1087c16adf50d400e2886c0ee7be52d9 100644
 --- a/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m
 +++ b/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m
-@@ -19,6 +19,146 @@
+@@ -19,6 +19,166 @@
  
  #import "NotifeeCoreDelegateHolder.h"
  #import "NotifeeCoreUtil.h"
 +#import <CommonCrypto/CommonDigest.h>
++
++// Runtime bridge avoids a dependency from Notifee to the ExpoWidgets pod.
++@protocol HandyBackgroundResponseHandler <NSObject>
+++ (BOOL)handleResponse:(UNNotificationResponse *)response notification:(NSDictionary *)notification
++            completion:(void (^)(void))completion;
++@end
 +
 +// Handy Actions local replies are persisted synchronously in native code. They
 +// never wait for a React bridge, navigate, or launch a deep link. Keep the wire
@@ -44,7 +50,21 @@ index beaa3600a9fc9edb0fed561c18f82fa57c8ea3ac..5ff3062a138f956faa241d4e08d90df2
 +  }
 +  if (![text isKindOfClass:NSString.class] ||
 +      [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length == 0) {
-+    completionHandler();
++    // iOS may disable empty Send entirely, and a background notification action
++    // cannot reliably foreground an app. Offer an explicit foreground editor.
++    NSMutableDictionary *updated = [notification mutableCopy];
++    NSMutableDictionary *updatedData = [data mutableCopy];
++    updatedData[@"captureActionId"] = actionId;
++    updatedData[@"editorText"] = text ?: @"";
++    updated[@"data"] = updatedData;
++    updated[@"ios"] = @{@"categoryId": @"handy-action-editor-v1"};
++    UNMutableNotificationContent *editor = [[UNMutableNotificationContent alloc] init];
++    editor.title = @"Continue in Handy Actions";
++    editor.body = @"Choose Open editor to write your note. Nothing was saved.";
++    editor.categoryIdentifier = @"handy-action-editor-v1";
++    editor.userInfo = @{kNotifeeUserInfoNotification: updated};
++    [center addNotificationRequest:[UNNotificationRequest requestWithIdentifier:response.notification.request.identifier content:editor trigger:nil]
++             withCompletionHandler:^(NSError *_Nullable error) { completionHandler(); }];
 +    return YES;
 +  }
 +
@@ -149,10 +169,15 @@ index beaa3600a9fc9edb0fed561c18f82fa57c8ea3ac..5ff3062a138f956faa241d4e08d90df2
  
  @implementation NotifeeCoreUNUserNotificationCenter
  
-@@ -178,6 +318,10 @@ struct {
+@@ -178,6 +338,15 @@ struct {
    NSDictionary *notifeeNotification =
        response.notification.request.content.userInfo[kNotifeeUserInfoNotification];
  
++  Class<HandyBackgroundResponseHandler> backgroundHandler = NSClassFromString(@"HandyBackgroundDelivery");
++  if ([backgroundHandler respondsToSelector:@selector(handleResponse:notification:completion:)] &&
++      [backgroundHandler handleResponse:response notification:notifeeNotification completion:completionHandler]) {
++    return;
++  }
 +  if (HandyHandleLocalNoteResponse(center, response, notifeeNotification, completionHandler)) {
 +    return;
 +  }

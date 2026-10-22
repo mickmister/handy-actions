@@ -1,3 +1,4 @@
+import type { RefObject } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 export const noteStyles = StyleSheet.create({
@@ -11,14 +12,17 @@ export const noteStyles = StyleSheet.create({
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
 
-export function NoteComposer({ text, onChangeText, onSubmit, busy }: {
+export function NoteComposer({ text, onChangeText, onSubmit, busy, selection, onSelectionChange, inputRef, submitLabel = 'Send note' }: {
   text: string; onChangeText: (text: string) => void; onSubmit: () => void; busy: boolean;
+  selection?: { start: number; end: number }; onSelectionChange?: (selection: { start: number; end: number }) => void;
+  inputRef?: RefObject<TextInput | null>; submitLabel?: string;
 }) {
   return <View style={noteStyles.card}>
-    <TextInput accessibilityLabel="Note text" value={text} onChangeText={onChangeText} multiline
+    <TextInput ref={inputRef} accessibilityLabel="Note text" value={text} onChangeText={onChangeText} multiline
+      selection={selection} onSelectionChange={event=>onSelectionChange?.(event.nativeEvent.selection)}
       placeholder="Write a note…" placeholderTextColor="#8792a2" style={noteStyles.input} editable={!busy} />
     <Pressable accessibilityRole="button" disabled={busy || !text.trim()} style={[noteStyles.button, (busy || !text.trim()) && { opacity: 0.5 }]} onPress={onSubmit}>
-      <Text style={noteStyles.buttonText}>{busy ? 'Sending…' : 'Send note'}</Text>
+      <Text style={noteStyles.buttonText}>{busy ? 'Sending…' : submitLabel}</Text>
     </Pressable>
   </View>;
 }

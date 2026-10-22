@@ -128,6 +128,7 @@ export function useHandyState() {
   const exportText = useMemo(() => exportHandyState(state), [state]);
 
   const updateSurfaces = (surfaces: SurfaceSettings) => persist({ ...state, surfaces }, 'Lock-screen settings saved.');
+  const updateTheme = (theme: NonNullable<HandyState['theme']>) => persist({...state,theme},'Theme saved.');
   const updateAction = (presetId: string, actionId: string, name: string, payload: HandyActionPayload) =>
     persist({ ...state, presets: state.presets.map((preset) => preset.id === presetId
       ? { ...preset, actions: preset.actions.map((action) => action.id === actionId ? { ...action, name: name.trim() || 'Untitled action', payload } : action) }
@@ -146,6 +147,7 @@ export function useHandyState() {
     importText,
     exportText,
     updateSurfaces,
+    updateTheme,
     updateAction,
   };
 }

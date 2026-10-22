@@ -11,16 +11,25 @@ export type WebActionPayload = {
 export type DeepLinkActionPayload = {
   type: 'deeplink';
   url: string;
-  fallbackUrl?: string;
 };
 
 export type TextInputActionPayload = {
   type: 'text-input';
   urlTemplate: string;
-  fallbackUrlTemplate?: string;
 };
 
-export type HandyActionPayload = QrActionPayload | WebActionPayload | DeepLinkActionPayload | TextInputActionPayload;
+export type HttpActionPayload = {
+  type: 'http'; originId: string; path: string; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  bodyFormat: 'none' | 'json' | 'text'; body: string; captureText: boolean;
+};
+export type AgentSession = { id: string; workspaceId: string; label: string; executor: string };
+export type AgentActionPayload = { type: 'vd-agent'; originId: string; prefix: string; session?: AgentSession };
+
+export type HandyActionPayload = QrActionPayload | WebActionPayload | DeepLinkActionPayload | TextInputActionPayload | HttpActionPayload | AgentActionPayload;
+
+export function isInputPayload(payload: HandyActionPayload): boolean {
+  return payload.type === 'text-input' || payload.type === 'vd-agent' || (payload.type === 'http' && payload.captureText);
+}
 
 export type SurfaceSettings = {
   liveActivities: boolean;
@@ -49,6 +58,7 @@ export type HandyPreset = {
 export type HandyState = {
   presets: HandyPreset[];
   surfaces?: SurfaceSettings;
+  theme?: 'psychedelic' | 'midnight' | 'paper';
 };
 
 export type ValidationResult = { ok: true; errors: [] } | { ok: false; errors: string[] };
@@ -69,6 +79,7 @@ export type HandyActionsLiveActivityProps = {
   updatedAt: string;
   openUrl: string;
   actionLinks?: { title: string; url: string; captureTarget?: string }[];
+  theme?: { id: string; colors: string[]; accent: string; ink: string; muted: string; tile: string };
 };
 
 export const ACTION_PRESS_PREFIX = 'handy-action:';
@@ -112,6 +123,7 @@ export function normalizeHandyState(value: unknown): HandyState {
   }
 
   return {
+    ...(isRecord(value) && ['psychedelic', 'midnight', 'paper'].includes(String(value.theme)) ? { theme: value.theme as HandyState['theme'] } : {}),
     ...(isRecord(value.surfaces) ? { surfaces: {
       liveActivities: value.surfaces.liveActivities !== false,
       lockScreenWidgets: value.surfaces.lockScreenWidgets === true,
@@ -147,6 +159,7 @@ export function validateHandyState(state: unknown): ValidationResult {
   }
 
   const presetIds = new Set<string>();
+  if(state.theme!==undefined && !['psychedelic','midnight','paper'].includes(String(state.theme)))errors.push('theme must be psychedelic, midnight or paper.');
   if (state.surfaces !== undefined) {
     const settings = state.surfaces;
     if (!isRecord(settings) || ['liveActivities', 'lockScreenWidgets', 'notifications'].some((key) => typeof settings[key] !== 'boolean')) {
@@ -207,13 +220,14 @@ export function actionNotificationRows(preset: HandyPreset): NotificationActionR
 
 // Versioned wire contract with the native intent in patches/expo-widgets@57.0.22.patch.
 // Carry the destination snapshot so posting does not depend on React or async storage.
-export function liveActivityCaptureTarget(presetId: string, action: HandyAction, localSave = false): string | undefined {
-  if (action.payload.type !== 'text-input') return undefined;
+export function liveActivityCaptureTarget(presetId: string, action: HandyAction, localSave = false, backgroundRequest = false): string | undefined {
+  if (!isInputPayload(action.payload)) return undefined;
   return `handy-note-capture-v1:${JSON.stringify({
     actionId: action.id,
     presetId,
     title: action.name,
     ...(localSave ? { localSave: true } : {}),
+    ...(backgroundRequest ? { backgroundRequest: true } : {}),
     actions: JSON.stringify([{ id: action.id, title: action.name, payload: action.payload }]),
   })}`;
 }
@@ -294,10 +308,22 @@ export function enabledPresets(state: HandyState): HandyPreset[] {
 function validatePayload(payload: unknown, path: string): string[] {
   if (!isRecord(payload)) return [`${path} must be an object.`];
   if (payload.type === 'text-input') {
-    const errors = validTextTemplate(payload.urlTemplate) ? [] : [`${path}.urlTemplate must be an app/https URL containing {text} in its query or path.`];
-    if (payload.fallbackUrlTemplate !== undefined && (!validTextTemplate(payload.fallbackUrlTemplate) || !isHttpUrl(payload.fallbackUrlTemplate.replaceAll('{text}', 'note')))) {
-      errors.push(`${path}.fallbackUrlTemplate must be an http(s) URL containing {text}.`);
-    }
+    return validTextTemplate(payload.urlTemplate) ? [] : [`${path}.urlTemplate must be an app/https URL containing {text} in its query or path.`];
+  }
+  if (payload.type === 'http') {
+    const errors: string[] = [];
+    if (!isNonEmptyString(payload.originId)) errors.push(`${path}.originId is required.`);
+    if (typeof payload.path !== 'string' || !payload.path.startsWith('/') || /^\/\//.test(payload.path) || /[\\\r\n#]/.test(payload.path)) errors.push(`${path}.path must be a relative /path.`);
+    if (!['GET','POST','PUT','PATCH','DELETE'].includes(String(payload.method))) errors.push(`${path}.method is invalid.`);
+    if (!['none','json','text'].includes(String(payload.bodyFormat)) || typeof payload.body !== 'string') errors.push(`${path}.body format is invalid.`);
+    if (payload.method === 'GET' && payload.bodyFormat !== 'none') errors.push(`${path}: GET cannot have a body.`);
+    if (payload.bodyFormat === 'json') { try { JSON.parse(String(payload.body)); } catch { errors.push(`${path}.body must be valid JSON; use a string "{text}" placeholder.`); } }
+    if (typeof payload.captureText !== 'boolean') errors.push(`${path}.captureText must be boolean.`);
+    return errors;
+  }
+  if (payload.type === 'vd-agent') {
+    const errors = isNonEmptyString(payload.originId) && typeof payload.prefix === 'string' ? [] : [`${path}: origin and prefix are required.`];
+    if (payload.session !== undefined && (!isRecord(payload.session) || !['id','workspaceId','label','executor'].every(k => isNonEmptyString((payload.session as Record<string,unknown>)[k])))) errors.push(`${path}.session must be a complete selected session.`);
     return errors;
   }
   if (payload.type === 'qr') {
@@ -307,13 +333,9 @@ function validatePayload(payload: unknown, path: string): string[] {
     return isHttpUrl(payload.url) ? [] : [`${path}.url must be http(s) for web actions.`];
   }
   if (payload.type === 'deeplink') {
-    const errors = isNonEmptyString(payload.url) ? [] : [`${path}.url must be non-empty for deeplink actions.`];
-    if (payload.fallbackUrl !== undefined && !isHttpUrl(payload.fallbackUrl)) {
-      errors.push(`${path}.fallbackUrl must be http(s) when present.`);
-    }
-    return errors;
+    return isNonEmptyString(payload.url) ? [] : [`${path}.url must be non-empty for deeplink actions.`];
   }
-  return [`${path}.type must be "qr", "web", "deeplink", or "text-input".`];
+  return [`${path}.type is unsupported.`];
 }
 
 function normalizePayload(payload: unknown): HandyActionPayload {
@@ -321,15 +343,14 @@ function normalizePayload(payload: unknown): HandyActionPayload {
   if (payload.type === 'text-input' && typeof payload.urlTemplate === 'string') {
     return {
       type: 'text-input', urlTemplate: payload.urlTemplate,
-      ...(typeof payload.fallbackUrlTemplate === 'string' ? { fallbackUrlTemplate: payload.fallbackUrlTemplate } : {}),
     };
   }
   if (payload.type === 'web' && typeof payload.url === 'string') return { type: 'web', url: payload.url };
   if (payload.type === 'deeplink' && typeof payload.url === 'string') {
-    return typeof payload.fallbackUrl === 'string'
-      ? { type: 'deeplink', url: payload.url, fallbackUrl: payload.fallbackUrl }
-      : { type: 'deeplink', url: payload.url };
+    return { type: 'deeplink', url: payload.url };
   }
+  if (payload.type === 'http') return { type: 'http', originId: String(payload.originId ?? ''), path: String(payload.path ?? ''), method: payload.method as HttpActionPayload['method'], bodyFormat: payload.bodyFormat as HttpActionPayload['bodyFormat'], body: String(payload.body ?? ''), captureText: payload.captureText === true };
+  if (payload.type === 'vd-agent') return { type: 'vd-agent', originId: String(payload.originId ?? ''), prefix: typeof payload.prefix === 'string' ? payload.prefix : '', ...(isRecord(payload.session) ? { session: { id: String(payload.session.id ?? ''), workspaceId: String(payload.session.workspaceId ?? ''), label: String(payload.session.label ?? ''), executor: String(payload.session.executor ?? '') } } : {}) };
   if (payload.type === 'qr' && typeof payload.value === 'string') return { type: 'qr', value: payload.value };
   return { type: 'qr', value: '' };
 }

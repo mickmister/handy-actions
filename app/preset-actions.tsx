@@ -1,8 +1,8 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { runActionPayload, syncPresetNotifications } from '@/src/core/handyNotifications';
-import type { HandyAction } from '@/src/core/handyModel';
+import { isInputPayload, type HandyAction } from '@/src/core/handyModel';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 
 export default function PresetActionsScreen() {
@@ -14,7 +14,7 @@ export default function PresetActionsScreen() {
   const title = !handy.loaded ? 'Loading actions…' : preset?.name ?? 'Preset not found';
 
   async function useAction(action: HandyAction) {
-    if (action.payload.type === 'text-input') {
+    if (isInputPayload(action.payload) || action.payload.type === 'http') {
       router.push({ pathname: '/capture', params: { actionId: action.id, presetId } });
       return;
     }
@@ -61,8 +61,8 @@ export default function PresetActionsScreen() {
               </View>
               <Text style={styles.typePill}>{action.payload.type}</Text>
             </View>
-            <Pressable style={styles.primaryButton} onPress={() => void useAction(action)}>
-              <Text style={styles.primaryButtonText}>{action.payload.type === 'qr' ? 'Show QR' : action.payload.type === 'text-input' ? 'Add Note' : 'Open'}</Text>
+            <Pressable style={styles.primaryButton} onPress={() => void useAction(action).catch(()=>Alert.alert('Could not open action','The configured destination could not be opened.'))}>
+              <Text style={styles.primaryButtonText}>{action.payload.type === 'qr' ? 'Show QR' : isInputPayload(action.payload) ? 'Write' : action.payload.type==='http'?'Run request':'Open'}</Text>
             </Pressable>
           </View>
         ))}
@@ -74,9 +74,8 @@ export default function PresetActionsScreen() {
 function actionSummary(action: HandyAction): string {
   if (action.payload.type === 'text-input') return action.payload.urlTemplate;
   if (action.payload.type === 'qr') return action.payload.value;
-  if (action.payload.type === 'deeplink' && action.payload.fallbackUrl) {
-    return `${action.payload.url} · fallback ${action.payload.fallbackUrl}`;
-  }
+  if (action.payload.type === 'http') return `${action.payload.method} ${action.payload.path}`;
+  if (action.payload.type === 'vd-agent') return action.payload.session?.label ?? 'Choose a session each time';
   return action.payload.url;
 }
 

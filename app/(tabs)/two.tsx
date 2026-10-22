@@ -6,6 +6,8 @@ import type { HandyActionPayload } from '@/src/core/handyModel';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 import { Link } from 'expo-router';
 import * as ExpoLinking from 'expo-linking';
+import { RemoteActionEditor } from '@/components/RemoteActionEditor';
+import { isInputPayload } from '@/src/core/handyModel';
 
 type PayloadType = HandyActionPayload['type'];
 
@@ -19,19 +21,18 @@ export default function ActionsScreen() {
   const [name, setName] = useState('');
   const [type, setType] = useState<PayloadType>('qr');
   const [value, setValue] = useState('');
-  const [fallbackUrl, setFallbackUrl] = useState('');
+  const [remote, setRemote] = useState<HandyActionPayload>({type:'http',originId:'',path:'/',method:'POST',bodyFormat:'json',body:'{"text":"{text}"}',captureText:true});
   const [editingId, setEditingId] = useState<string>();
 
   async function addAction() {
     if (!selectedPreset) return;
-    const payload = makePayload(type, value, fallbackUrl);
+    const payload = type==='http'||type==='vd-agent' ? remote : makePayload(type, value);
     const result = editingId
       ? await handy.updateAction(selectedPreset.id, editingId, name, payload)
       : await handy.addAction(selectedPreset.id, name, payload);
     if (result.ok) {
       setName('');
       setValue('');
-      setFallbackUrl('');
       setEditingId(undefined);
     } else {
       Alert.alert('Cannot add action', result.message);
@@ -60,7 +61,7 @@ export default function ActionsScreen() {
                 <Pressable
                   key={preset.id}
                   style={preset.id === selectedPreset?.id ? styles.selectedChip : styles.chip}
-                  onPress={() => { setSelectedPresetId(preset.id); setEditingId(undefined); setName(''); setValue(''); setFallbackUrl(''); }}>
+                  onPress={() => { setSelectedPresetId(preset.id); setEditingId(undefined); setName(''); setValue(''); }}>
                   <Text style={preset.id === selectedPreset?.id ? styles.selectedChipText : styles.chipText}>{preset.name}</Text>
                 </Pressable>
               ))}
@@ -71,12 +72,14 @@ export default function ActionsScreen() {
             <Text style={styles.cardTitle}>{editingId ? 'Edit action' : 'Add action'}</Text>
             <TextInput value={name} onChangeText={setName} placeholder="My LinkedIn" placeholderTextColor="#8792a2" style={styles.input} />
             <View style={styles.chips}>
-              {(['qr', 'web', 'deeplink', 'text-input'] as const).map((payloadType) => (
+              {(['qr', 'web', 'deeplink', 'text-input','http','vd-agent'] as const).map((payloadType) => (
                 <Pressable
                   key={payloadType}
                   style={type === payloadType ? styles.selectedChip : styles.chip}
                   onPress={() => {
                     setType(payloadType);
+                    if(payloadType==='http')setRemote({type:'http',originId:'',path:'/',method:'POST',bodyFormat:'json',body:'{"text":"{text}"}',captureText:true});
+                    if(payloadType==='vd-agent')setRemote({type:'vd-agent',originId:'',prefix:''});
                     if (payloadType === 'text-input' && !value) {
                       setValue(`${ExpoLinking.createURL('/notes')}?text={text}`);
                       if (!name) setName('Add Note');
@@ -86,7 +89,7 @@ export default function ActionsScreen() {
                 </Pressable>
               ))}
             </View>
-            <TextInput
+            {type!=='http'&&type!=='vd-agent'?<TextInput
               value={value}
               onChangeText={setValue}
               autoCapitalize="none"
@@ -94,28 +97,18 @@ export default function ActionsScreen() {
               placeholder={type === 'qr' ? 'QR value or URL' : type === 'text-input' ? 'app://add-note?text={text}' : 'https://example.test or app://target'}
               placeholderTextColor="#8792a2"
               style={styles.input}
-            />
+            />:null}
             {type === 'text-input' ? <>
               <Text style={styles.copy}>Use {'{text}'} where the URL should receive your note. Text is URL-encoded automatically.</Text>
               <Pressable style={styles.secondaryButton} onPress={() => setValue(`${ExpoLinking.createURL('/notes')}?text={text}`)}>
                 <Text style={styles.secondaryButtonText}>Use this app as destination</Text>
               </Pressable>
             </> : null}
-            {type === 'deeplink' || type === 'text-input' ? (
-              <TextInput
-                value={fallbackUrl}
-                onChangeText={setFallbackUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder={type === 'text-input' ? 'Fallback https://…?text={text} (optional)' : 'Fallback web URL (optional)'}
-                placeholderTextColor="#8792a2"
-                style={styles.input}
-              />
-            ) : null}
-            <Pressable style={styles.primaryButton} onPress={addAction}>
+            {(type==='http'||type==='vd-agent')&&(remote.type==='http'||remote.type==='vd-agent')?<RemoteActionEditor value={remote} onChange={setRemote} />:null}
+            <Pressable style={styles.primaryButton} onPress={()=>void addAction().catch(()=>Alert.alert('Action','Could not save this action.'))}>
               <Text style={styles.primaryButtonText}>{editingId ? 'Save action' : 'Add action'}</Text>
             </Pressable>
-            {editingId ? <Pressable onPress={() => { setEditingId(undefined); setName(''); setValue(''); setFallbackUrl(''); }}>
+            {editingId ? <Pressable onPress={() => { setEditingId(undefined); setName(''); setValue(''); }}>
               <Text style={styles.deleteText}>Cancel editing</Text>
             </Pressable> : null}
           </View>
@@ -135,19 +128,19 @@ export default function ActionsScreen() {
                       <Text style={styles.secondaryButtonText}>Show QR</Text>
                     </Pressable>
                   </Link>
-                ) : action.payload.type === 'text-input' ? (
+                ) : isInputPayload(action.payload) || action.payload.type==='http' ? (
                   <Link href={{ pathname: '/capture', params: { actionId: action.id, presetId: selectedPreset.id } }} asChild>
-                    <Pressable style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Add Note</Text></Pressable>
+                    <Pressable style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>{action.payload.type==='vd-agent'?'Write prompt':action.payload.type==='http'?'Run request':'Add Note'}</Text></Pressable>
                   </Link>
                 ) : (
-                  <Pressable style={styles.secondaryButton} onPress={() => void runActionPayload(action.payload)}>
+                  <Pressable style={styles.secondaryButton} onPress={() => void runActionPayload(action.payload).catch(()=>Alert.alert('Could not open destination','The configured destination could not be opened.'))}>
                     <Text style={styles.secondaryButtonText}>Open</Text>
                   </Pressable>
                 )}
                 <Pressable onPress={() => {
                   setEditingId(action.id); setName(action.name); setType(action.payload.type);
-                  setValue(action.payload.type === 'qr' ? action.payload.value : action.payload.type === 'text-input' ? action.payload.urlTemplate : action.payload.url);
-                  setFallbackUrl(action.payload.type === 'deeplink' ? action.payload.fallbackUrl ?? '' : action.payload.type === 'text-input' ? action.payload.fallbackUrlTemplate ?? '' : '');
+                  if(action.payload.type==='http'||action.payload.type==='vd-agent')setRemote(action.payload);
+                  else setValue(action.payload.type === 'qr' ? action.payload.value : action.payload.type === 'text-input' ? action.payload.urlTemplate : action.payload.url);
                 }}><Text style={styles.chipText}>Edit</Text></Pressable>
                 <Pressable onPress={() => selectedPreset && void handy.deleteAction(selectedPreset.id, action.id)}>
                   <Text style={styles.deleteText}>Delete</Text>
@@ -161,14 +154,13 @@ export default function ActionsScreen() {
   );
 }
 
-function makePayload(type: PayloadType, value: string, fallbackUrl: string): HandyActionPayload {
-  if (type === 'text-input') return { type, urlTemplate: value.trim(), ...(fallbackUrl.trim() ? { fallbackUrlTemplate: fallbackUrl.trim() } : {}) };
+function makePayload(type: PayloadType, value: string): HandyActionPayload {
+  if (type === 'text-input') return { type, urlTemplate: value.trim() };
   if (type === 'web') return { type, url: value.trim() };
   if (type === 'deeplink') {
-    const fallback = fallbackUrl.trim();
-    return fallback ? { type, url: value.trim(), fallbackUrl: fallback } : { type, url: value.trim() };
+    return { type, url: value.trim() };
   }
-  return { type, value: value.trim() };
+  return { type: 'qr', value: value.trim() };
 }
 
 const styles = StyleSheet.create({

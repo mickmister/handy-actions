@@ -22,6 +22,7 @@ import {
   presetIdFromPressId,
   presetPressId,
   makeId,
+  isInputPayload,
   surfaceSettings,
   type HandyAction,
   type HandyActionPayload,
@@ -30,9 +31,13 @@ import {
 import { loadHandyState } from './handyStore';
 import { syncPresetLiveActivities } from './handyLiveActivities';
 import { syncLockScreenWidget } from './handyWidgets';
-import { pendingNotes, queueNote } from './handyNotes';
+import { markNoteAttempt, queueNote } from './handyNotes';
 import { isLocalNoteAction, LOCAL_INPUT_CATEGORY, LOCAL_RECOVERY_CATEGORY, LOCAL_RETRY_PRESS } from './localNoteDelivery';
 import { nativeNoteInbox } from './nativeNoteInbox';
+import { saveEditorDraft } from './editorDrafts';
+import { request } from './requests';
+import { httpRequestSpec } from './httpActions';
+import { nativeActionInbox } from './nativeActionInbox';
 
 const CHANNEL_ID = 'handy-actions';
 const INPUT_CATEGORY = 'handy-text-input';
@@ -43,6 +48,9 @@ let syncQueue: Promise<unknown> = Promise.resolve();
 function savesLocallyInNative(action: Pick<HandyAction, 'payload'>): boolean {
   return Platform.OS === 'ios' && !!nativeNoteInbox && isLocalNoteAction(action, ExpoLinking.createURL('/notes'));
 }
+function sendsInNative(action:Pick<HandyAction,'payload'>):boolean {
+  return !!nativeActionInbox && (action.payload.type==='http'&&action.payload.captureText || action.payload.type==='vd-agent'&&!!action.payload.session);
+}
 
 let currentState: HandyState = { presets: [] };
 let pressHandler: ((target: NotificationPressTarget) => void) | undefined;
@@ -50,7 +58,8 @@ let pendingTarget: NotificationPressTarget | undefined;
 
 export type NotificationPressTarget =
   | { type: 'action'; action: HandyAction; presetId?: string }
-  | { type: 'input'; submissionId: string }
+  | { type: 'input'; submissionId: string; submit?: boolean }
+  | { type: 'editor'; draftId: string }
   | { type: 'preset'; presetId: string };
 
 export type NotificationStatus = {
@@ -109,22 +118,25 @@ export function syncPresetNotifications(state: HandyState): Promise<string> {
 async function configureCategories(state: HandyState): Promise<void> {
   if (Platform.OS !== 'ios') return;
   await notifee.setNotificationCategories([
+    {id:'handy-action-editor-v1',actions:[{id:'handy-open-editor',title:'Open editor',foreground:true}]},
+    ...(nativeActionInbox?[{id:'handy-text-input-background-v1',actions:[{id:INPUT_PRESS,title:'Send',foreground:false,input:{placeholderText:'Write text…',buttonText:'Send'}},{id:'handy-open-editor',title:'Open editor',foreground:true}]}]:[]),
     { id: INPUT_CATEGORY, actions: [{ id: INPUT_PRESS, title: 'Add Note', foreground: true,
-      input: { placeholderText: 'Write a note…', buttonText: 'Send' } }] },
+      input: { placeholderText: 'Write a note…', buttonText: 'Send' } }, {id:'handy-open-editor',title:'Open editor',foreground:true}] },
     ...(nativeNoteInbox ? [
       { id: LOCAL_INPUT_CATEGORY, actions: [{ id: INPUT_PRESS, title: 'Add Note', foreground: false,
-        input: { placeholderText: 'Write a note…', buttonText: 'Save' } }] },
+        input: { placeholderText: 'Write a note…', buttonText: 'Save' } }, {id:'handy-open-editor',title:'Open editor',foreground:true}] },
       { id: LOCAL_RECOVERY_CATEGORY, actions: [
         { id: LOCAL_RETRY_PRESS, title: 'Retry save', foreground: false },
         { id: INPUT_PRESS, title: 'Edit note', foreground: false,
           input: { placeholderText: 'Write a replacement note…', buttonText: 'Save' } },
+        {id:'handy-open-editor',title:'Open editor',foreground:true},
       ] },
     ] : []),
     ...enabledPresets(state).map((preset) => ({
       id: categoryIdForPreset(preset.id),
       actions: actionNotificationRows(preset).slice(0, 2).map((row) => ({
-        id: actionPressId(row.id), title: row.title, foreground: !savesLocallyInNative(row),
-        ...(row.payload.type === 'text-input' ? { input: { placeholderText: 'Write a note…', buttonText: 'Send' } } : {}),
+        id: actionPressId(row.id), title: row.title, foreground: !(savesLocallyInNative(row)||sendsInNative(row)),
+        ...(isInputPayload(row.payload) ? { input: { placeholderText: 'Write a note…', buttonText: 'Send' } } : {}),
       })),
     })),
   ]);
@@ -159,6 +171,7 @@ async function syncSurfaces(state: HandyState): Promise<string> {
       title: preset.name,
       body: notificationBodyForPreset(preset),
       data: { presetId: preset.id, actions: notificationRowsData(preset), submissionId: makeId('submission'),
+        backgroundActionIds: JSON.stringify(rows.filter(sendsInNative).map(row=>row.id)),
         localNoteActionIds: JSON.stringify(rows.filter(savesLocallyInNative).map((row) => row.id)) },
       android: {
         channelId: CHANNEL_ID,
@@ -170,7 +183,7 @@ async function syncSurfaces(state: HandyState): Promise<string> {
         pressAction: { id: presetPressId(preset.id), launchActivity: 'default' },
         actions: rows.map((row) => ({
           title: row.title,
-          ...(row.payload.type === 'text-input' ? { input: { placeholder: 'Write a note…' } } : {}),
+          ...(isInputPayload(row.payload) ? { input: { placeholder: 'Write a note…' } } : {}),
           pressAction: {
             id: actionPressId(row.id),
             launchActivity: 'default',
@@ -209,20 +222,11 @@ export async function runActionPayload(payload: HandyActionPayload): Promise<voi
   if (payload.type === 'qr') {
     return;
   }
-  if (payload.type === 'text-input') throw new Error('Open the note composer to use a text-input action.');
-
-  const url = payload.url;
-  const fallbackUrl = payload.type === 'deeplink' ? payload.fallbackUrl : undefined;
-
-  try {
-    await Linking.openURL(url);
-  } catch (error) {
-    if (fallbackUrl) {
-      await Linking.openURL(fallbackUrl);
-      return;
-    }
-    throw error;
+  if (isInputPayload(payload)) throw new Error('Open the editor to use this input action.');
+  if(payload.type==='http') {
+    const {path,...spec}=httpRequestSpec(payload);await request(payload.originId,path,spec,false);return;
   }
+  if(payload.type==='web'||payload.type==='deeplink')await Linking.openURL(payload.url);
 }
 
 export async function handleNotificationEvent(event: Event): Promise<void> {
@@ -240,28 +244,39 @@ async function openPressAction(pressId: unknown, data: unknown, input?: string, 
     const snapshot = actionFromNotificationData(actionId, data);
     // A reply belongs to the destination shown when that notification was posted,
     // even if its action was edited or deleted before the user submits.
-    const action = input !== undefined ? snapshot ?? storedAction : storedAction ?? snapshot;
-    if (action?.payload.type === 'text-input') {
+    const action = snapshot ?? storedAction;
+    if (action && isInputPayload(action.payload)) {
       if (input?.trim()) {
         const submissionId = `${dataString(data, 'submissionId') ?? notificationId ?? makeId('submission')}-${actionId}`;
         if (handledSubmissions.has(submissionId)) return;
         handledSubmissions.add(submissionId);
         try {
-          const pending = await queueNote(action, input, submissionId);
+          const pending = await queueNote(action, input, submissionId,sourcePresetId);
           if (!pending) return;
         } catch (error) { handledSubmissions.delete(submissionId); throw error; }
         if (notificationId) await notifee.cancelNotification(notificationId);
-        deliverPressTarget({ type: 'input', submissionId });
+        deliverPressTarget({ type: 'input', submissionId, submit: true });
         if (!captureActionId) await syncStoredPresetNotifications();
       } else {
-        deliverPressTarget({ type: 'action', action, presetId: sourcePresetId });
+        const draft=await saveEditorDraft(action,input ?? dataString(data,'editorText') ?? dataString(data,'localNoteRecoveryText') ?? '',sourcePresetId);
+        deliverPressTarget({ type:'editor',draftId:draft.id });
       }
       return;
     }
   }
   if (captureActionId) {
-    const action = findAction(await loadHandyState(), captureActionId, sourcePresetId)?.action ?? actionFromNotificationData(captureActionId, data);
-    if (action) deliverPressTarget({ type: 'action', action, presetId: sourcePresetId });
+    const action = actionFromNotificationData(captureActionId, data) ?? findAction(await loadHandyState(), captureActionId, sourcePresetId)?.action;
+    if (action) {
+      const text=dataString(data,'editorText') ?? dataString(data,'localNoteRecoveryText') ?? '';
+      const recoveryId=dataString(data,'recoverySubmissionId');
+      if(recoveryId && text.trim()) {
+        const pending=await queueNote(action,text,recoveryId,sourcePresetId);
+        if(pending){await markNoteAttempt(pending.id);deliverPressTarget({type:'input',submissionId:pending.id});}
+        return;
+      }
+      const draft=await saveEditorDraft(action,text,sourcePresetId);
+      deliverPressTarget({type:'editor',draftId:draft.id});
+    }
     return;
   }
   const presetId = typeof pressId === 'string' ? presetIdFromPressId(pressId) : presetIdFromNotificationData(data);
@@ -286,14 +301,14 @@ async function openPressAction(pressId: unknown, data: unknown, input?: string, 
   const action = found?.action ?? actionFromNotificationData(pressedActionId, data);
   if (!action) return;
 
-  if (action.payload.type === 'qr') {
+  if (action.payload.type === 'qr' || action.payload.type==='http') {
     deliverPressTarget({ type: 'action', action });
     await syncStoredPresetNotifications();
     return;
   }
 
   await syncStoredPresetNotifications();
-  await runActionPayload(action.payload);
+  deliverPressTarget({type:'action',action,presetId:sourcePresetId});
 }
 
 function deliverPressTarget(target: NotificationPressTarget): void {
@@ -318,21 +333,19 @@ export async function showTextInputNotification(action: HandyAction, presetId?: 
   await configureCategories(await loadHandyState());
   const submissionId = makeId('submission');
   const nativeLocal = savesLocallyInNative(action);
+  const nativeRequest = sendsInNative(action);
   await notifee.displayNotification({
     id: `handy-input-${submissionId}`, title: action.name,
     body: 'Expand this notification and select Add Note to type. You can also write in the app.',
     data: { captureActionId: action.id, submissionId, ...(presetId ? { presetId } : {}),
       ...(nativeLocal ? { localNoteDestination: '1' } : {}),
+      ...(nativeRequest ? {backgroundRequest:'1'} : {}),
       actions: JSON.stringify([{ id: action.id, title: action.name, payload: action.payload }]) },
-    ios: { categoryId: nativeLocal ? LOCAL_INPUT_CATEGORY : INPUT_CATEGORY, foregroundPresentationOptions: { banner: true, list: true, sound: false } },
+    ios: { categoryId: nativeLocal ? LOCAL_INPUT_CATEGORY : nativeRequest ? 'handy-text-input-background-v1' : INPUT_CATEGORY, foregroundPresentationOptions: { banner: true, list: true, sound: false } },
     android: { channelId: CHANNEL_ID, pressAction: { id: 'capture', launchActivity: 'default' },
-      actions: [{ title: 'Add Note', pressAction: { id: INPUT_PRESS, launchActivity: 'default' }, input: { placeholder: 'Write a note…' } }] },
+      actions: [{ title: 'Add Note', pressAction: { id: INPUT_PRESS, launchActivity: 'default' }, input: { placeholder: 'Write a note…' } },
+        {title:'Open editor',pressAction:{id:'handy-open-editor',launchActivity:'default'}}] },
   });
-}
-
-export async function resumePendingNote(): Promise<void> {
-  const pending = (await pendingNotes())[0];
-  if (pending) deliverPressTarget({ type: 'input', submissionId: pending.id });
 }
 
 function dataString(data: unknown, key: string): string | undefined {

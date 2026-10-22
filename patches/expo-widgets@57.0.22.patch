@@ -1,3 +1,261 @@
+diff --git a/ios/HandyBackgroundDelivery.swift b/ios/HandyBackgroundDelivery.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..adc9f917906606930bb0a1a98d80bd952229c0b2
+--- /dev/null
++++ b/ios/HandyBackgroundDelivery.swift
+@@ -0,0 +1,252 @@
++import Foundation
++import Security
++import CryptoKit
++import UserNotifications
++
++// Called by the pinned Notifee callback before React event delivery. This class
++// lives in the host, not the widget extension; credentials never enter activities.
++@objc(HandyBackgroundDelivery)
++final class HandyBackgroundDelivery: NSObject, URLSessionTaskDelegate {
++  private static let gate = NSLock()
++  private enum Failure: Error { case retained(String) }
++  private let deadline = Date().addingTimeInterval(20)
++
++  func urlSession(_ session: URLSession, task: URLSessionTask,
++                  willPerformHTTPRedirection response: HTTPURLResponse,
++                  newRequest request: URLRequest,
++                  completionHandler: @escaping (URLRequest?) -> Void) {
++    completionHandler(nil) // Never forward origin credentials through redirects.
++  }
++
++  private static func folder() throws -> URL {
++    let directory = try FileManager.default.url(for: .applicationSupportDirectory,
++      in: .userDomainMask, appropriateFor: nil, create: true)
++      .appendingPathComponent("HandyActionsActionInbox", isDirectory: true)
++    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
++      attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
++    return directory
++  }
++
++  private static func file(_ id: String) throws -> URL {
++    let digest = SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
++    return try folder().appendingPathComponent("\(digest).json")
++  }
++
++  private static func write(_ record: [String: Any], to file: URL) throws {
++    try JSONSerialization.data(withJSONObject: record).write(to: file,
++      options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
++  }
++
++  private static func finish(_ record: [String: Any], _ id: String) throws {
++    gate.lock(); defer { gate.unlock() }
++    try write(record, to: file(id))
++  }
++
++  static func readInbox() throws -> [[String: Any]] {
++    gate.lock(); defer { gate.unlock() }
++    return try FileManager.default.contentsOfDirectory(at: folder(), includingPropertiesForKeys: nil)
++      .filter { $0.pathExtension == "json" }.compactMap { file in
++        guard let record = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any] else {
++          throw Failure.retained("A background draft could not be read; its file was retained.")
++        }
++        // Do not import/ack a live task. A killed process leaves a recoverable
++        // uncertain draft after the bounded native execution window has elapsed.
++        if record["inFlight"] as? Bool == true,
++           let started = record["startedAt"] as? Double, Date().timeIntervalSince1970 - started < 30 { return nil }
++        return record
++      }
++  }
++
++  static func acknowledge(_ id: String) throws {
++    gate.lock(); defer { gate.unlock() }
++    let url = try file(id)
++    if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
++  }
++
++  @objc(handleResponse:notification:completion:)
++  static func handle(response: UNNotificationResponse, notification: [String: Any], completion: @escaping () -> Void) -> Bool {
++    guard let data = notification["data"] as? [String: Any] else { return false }
++    let press = response.actionIdentifier
++    let actionId: String
++    if press == "handy-input-submit", data["backgroundRequest"] as? String == "1",
++       let id = data["captureActionId"] as? String { actionId = id }
++    else if press.hasPrefix("handy-action:"), let encoded = data["backgroundActionIds"] as? String,
++            let ids = try? JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String],
++            ids.contains(String(press.dropFirst("handy-action:".count))) {
++      actionId = String(press.dropFirst("handy-action:".count))
++    } else { return false }
++    guard let response = response as? UNTextInputNotificationResponse,
++          let encoded = data["actions"] as? String,
++          let rows = try? JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [[String: Any]],
++          let row = rows.first(where: { $0["id"] as? String == actionId }),
++          let payload = row["payload"] as? [String: Any],
++          payload["type"] as? String == "http" || (payload["type"] as? String == "vd-agent" && payload["session"] is [String: Any]) else { return false }
++    let text = response.userText
++    let id = "\(data["submissionId"] as? String ?? response.notification.request.identifier)-\(actionId)"
++    let action: [String: Any] = ["id": actionId, "name": row["title"] as? String ?? "Action", "payload": payload]
++    var record: [String: Any] = ["id": id, "action": action, "text": text,
++      "presetId": data["presetId"] as? String ?? "",
++      "createdAt": ISO8601DateFormatter().string(from: Date()), "attempted": true,
++      "startedAt": Date().timeIntervalSince1970, "inFlight": true, "completed": false]
++    do {
++      gate.lock(); defer { gate.unlock() }
++      let url = try file(id)
++      let claim = url.deletingPathExtension().appendingPathExtension("claim")
++      if FileManager.default.fileExists(atPath: url.path) || FileManager.default.fileExists(atPath: claim.path) { completion(); return true }
++      try write(record, to: url) // Durable claim BEFORE any side-effecting request.
++      // Retain this small tombstone after JS acknowledges the journal. Duplicate
++      // OS callbacks must not resend an already imported success/uncertain write.
++      try Data().write(to: claim, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
++    } catch {
++      feedback(response, notification, actionId, text, id, "Draft could not be saved. Open the editor; no request was sent.", false, completion)
++      return true
++    }
++    Task {
++      var success = false
++      var message = "Delivery could not be confirmed. Review the destination before retrying in the editor."
++      if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
++        message = "Choose Open editor to continue. No empty request was sent."
++      } else {
++        do { message = try await HandyBackgroundDelivery().deliver(payload, text); success = true }
++        catch Failure.retained(let safeMessage) { message = safeMessage }
++        catch { /* Never display errors/server bodies that could contain headers. */ }
++      }
++      record["inFlight"] = false; record["completed"] = success
++      do {
++        try finish(record, id)
++      } catch { success = false; message = "Delivery may have succeeded, but the receipt could not be saved. Review before retrying." }
++      feedback(response, notification, actionId, text, id, message, success, completion)
++    }
++    return true
++  }
++
++  private static func feedback(_ response: UNNotificationResponse, _ notification: [String: Any],
++    _ actionId: String, _ text: String, _ id: String, _ message: String, _ success: Bool,
++    _ completion: @escaping () -> Void) {
++    let center = UNUserNotificationCenter.current()
++    let content = UNMutableNotificationContent()
++    content.title = success ? "Sent" : "Continue in Handy Actions"
++    content.body = message
++    if !success {
++      content.categoryIdentifier = "handy-action-editor-v1"
++      var updated = notification
++      var data = notification["data"] as? [String: Any] ?? [:]
++      data["captureActionId"] = actionId; data["editorText"] = text; data["recoverySubmissionId"] = id
++      updated["data"] = data; updated["ios"] = ["categoryId": content.categoryIdentifier]
++      content.userInfo = ["__notifee_notification": updated]
++    }
++    let requestId = response.notification.request.identifier
++    if requestId.hasPrefix("handy-preset-") && success {
++      var next = notification
++      var nextData = notification["data"] as? [String: Any] ?? [:]
++      nextData["submissionId"] = UUID().uuidString; next["data"] = nextData
++      let panel = response.notification.request.content.mutableCopy() as! UNMutableNotificationContent
++      panel.userInfo = ["__notifee_notification": next]
++      center.add(UNNotificationRequest(identifier: requestId, content: panel, trigger: nil)) { _ in
++        center.add(UNNotificationRequest(identifier: "handy-background-result-\(id)", content: content, trigger: nil)) { _ in completion() }
++      }
++    } else {
++      center.add(UNNotificationRequest(identifier: requestId, content: content, trigger: nil)) { _ in completion() }
++    }
++  }
++
++  private func profile(_ id: String) throws -> [String: Any] {
++    let key = Data("handy-origin-\(id)".utf8)
++    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
++      kSecAttrService as String: "handy-actions-origins-v1:no-auth", kSecAttrAccount as String: key,
++      kSecAttrGeneric as String: key, kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
++    var item: CFTypeRef?
++    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
++          let data = item as? Data,
++          let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
++      throw Failure.retained("Connection is unavailable while locked or was removed. Open Settings; draft retained.")
++    }
++    return result
++  }
++
++  private func request(_ session: URLSession, _ profile: [String: Any], _ path: String,
++    _ method: String = "GET", _ body: Data? = nil, _ contentType: String? = nil, _ json: Bool = true) async throws -> Any {
++    guard let origin = profile["origin"] as? String, let base = URL(string: origin),
++      ["https", "http"].contains(base.scheme?.lowercased() ?? ""), base.user == nil, base.password == nil,
++      base.query == nil, base.fragment == nil, ["", "/"].contains(base.path),
++      path.hasPrefix("/"), !path.hasPrefix("//"), !path.contains("\\"), !path.contains("\r"), !path.contains("\n"), !path.contains("#"),
++      let url = URL(string: path, relativeTo: base)?.absoluteURL,
++      url.scheme?.lowercased() == base.scheme?.lowercased(), url.host?.lowercased() == base.host?.lowercased(), url.port == base.port,
++      url.user == nil, url.password == nil, deadline.timeIntervalSinceNow > 0 else { throw Failure.retained("Invalid connection/path or request timeout. Draft retained.") }
++    var request = URLRequest(url: url, timeoutInterval: min(8, deadline.timeIntervalSinceNow))
++    request.httpMethod = method; request.httpBody = body; request.httpShouldHandleCookies = false
++    if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
++    for header in profile["headers"] as? [[String: Any]] ?? [] {
++      guard let name = header["name"] as? String, let value = header["value"] as? String,
++            !value.contains("\r"), !value.contains("\n") else { throw Failure.retained("Invalid connection headers. Draft retained.") }
++      request.setValue(value, forHTTPHeaderField: name)
++    }
++    let (data, response) = try await session.data(for: request)
++    guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
++      throw Failure.retained("Request rejected or redirected. Draft retained; review before retrying.")
++    }
++    if !json { return NSNull() }
++    guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any],
++          envelope["success"] as? Bool == true, let result = envelope["data"] else {
++      throw Failure.retained("VD rejected the request. Draft retained; review before retrying.")
++    }
++    return result
++  }
++
++  private func deliver(_ payload: [String: Any], _ text: String) async throws -> String {
++    guard let originId = payload["originId"] as? String else { throw Failure.retained("Choose a configured connection in the editor.") }
++    let connection = try profile(originId)
++    let configuration = URLSessionConfiguration.ephemeral
++    configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil; configuration.urlCache = nil
++    configuration.timeoutIntervalForResource = 20
++    let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
++    defer { session.invalidateAndCancel() }
++    let encode: (String) -> String = { $0.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()")) ?? "" }
++    if payload["type"] as? String == "http" {
++      guard let path = payload["path"] as? String, let method = payload["method"] as? String,
++            ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), let format = payload["bodyFormat"] as? String,
++            ["none", "json", "text"].contains(format), let template = payload["body"] as? String else { throw Failure.retained("Invalid HTTP action; open the editor.") }
++      guard method != "GET" || format == "none" else { throw Failure.retained("GET actions cannot have a body.") }
++      var body: Data? = nil
++      if format == "json" {
++        func substitute(_ value: Any) -> Any {
++          if let string = value as? String { return string.replacingOccurrences(of: "{text}", with: text) }
++          if let array = value as? [Any] { return array.map(substitute) }
++          if let object = value as? [String: Any] { return object.mapValues(substitute) }
++          return value
++        }
++        body = try JSONSerialization.data(withJSONObject: substitute(JSONSerialization.jsonObject(with: Data(template.utf8), options: .fragmentsAllowed)), options: .fragmentsAllowed)
++      } else if format == "text" { body = Data(template.replacingOccurrences(of: "{text}", with: text).utf8) }
++      _ = try await request(session, connection, path.replacingOccurrences(of: "{text}", with: encode(text)), method, body,
++        format == "json" ? "application/json" : format == "text" ? "text/plain; charset=utf-8" : nil, false)
++      return "Request sent."
++    }
++    guard let target = payload["session"] as? [String: Any], let id = target["id"] as? String, id != ".", id != "..", !id.isEmpty,
++      let workspace = target["workspaceId"] as? String, let executor = target["executor"] as? String else { throw Failure.retained("Choose a session in the editor; draft retained.") }
++    let path = "/api/sessions/\(encode(id))"
++    guard let current = try await request(session, connection, path) as? [String: Any], current["id"] as? String == id, current["workspace_id"] as? String == workspace,
++      current["executor"] as? String == executor, !executor.isEmpty else { throw Failure.retained("Locked session changed or is missing. Re-select it in the editor; draft retained.") }
++    guard let queue = try await request(session, connection, "\(path)/queue") as? [String: Any], queue["status"] as? String == "empty" else {
++      throw Failure.retained("A message may already be queued. Open the editor to review Append or Overwrite.")
++    }
++    guard let preview = try await request(session, connection, "\(path)/conversation-preview?limit=1") as? [String: Any],
++      preview["session_id"] as? String == id, let running = preview["has_running_turn"] as? Bool else { throw Failure.retained("Cannot verify session activity. Open the editor; draft retained.") }
++    let prefix = payload["prefix"] as? String ?? ""
++    let prompt = prefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : prefix + "\n" + text
++    let executorConfig = ["executor": executor]
++    if running {
++      guard let latest = try await request(session, connection, "\(path)/queue") as? [String: Any], latest["status"] as? String == "empty" else {
++        throw Failure.retained("Queue changed. Review it in the editor; no overwrite was attempted.")
++      }
++      let contents: [String: Any] = ["message": prompt, "executor_config": executorConfig]
++      let body = try JSONSerialization.data(withJSONObject: contents)
++      _ = try await request(session, connection, "\(path)/queue", "POST", body, "application/json")
++      return "Prompt queued for the busy agent."
++    }
++    let contents: [String: Any] = ["prompt": prompt, "executor_config": executorConfig,
++      "retry_process_id": NSNull(), "force_when_dirty": NSNull(), "perform_git_reset": NSNull()]
++    let body = try JSONSerialization.data(withJSONObject: contents)
++    _ = try await request(session, connection, "\(path)/follow-up", "POST", body, "application/json")
++    return "Prompt sent to the locked session."
++  }
++}
 diff --git a/ios/HandyNoteInbox.swift b/ios/HandyNoteInbox.swift
 new file mode 100644
 index 0000000000000000000000000000000000000000..b672a0c4cf60367976f03e0ca7bcde441371cfd6
@@ -44,7 +302,7 @@ index 0000000000000000000000000000000000000000..b672a0c4cf60367976f03e0ca7bcde44
 +  }
 +}
 diff --git a/ios/Widgets/AppIntent.swift b/ios/Widgets/AppIntent.swift
-index 972fa4f190d5da8f961218bcbe2436964ac34acf..acb44e1e04cf1262b30b684b017af70b4a0c7091 100644
+index 972fa4f190d5da8f961218bcbe2436964ac34acf..d6e42397e61ecdd7607cb8756632c5545bbc283e 100644
 --- a/ios/Widgets/AppIntent.swift
 +++ b/ios/Widgets/AppIntent.swift
 @@ -1,5 +1,6 @@
@@ -74,7 +332,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..acb44e1e04cf1262b30b684b017af70b
      WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
        "source": source as Any,
        "target": target as Any,
-@@ -128,3 +135,94 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+@@ -128,3 +135,104 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
      return .result()
    }
  }
@@ -90,6 +348,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..acb44e1e04cf1262b30b684b017af70b
 +    // Same snapshot consumed by actionFromNotificationRowsData in the host app.
 +    let actions: String
 +    let localSave: Bool?
++    let backgroundRequest: Bool?
 +  }
 +
 +  static func post(target: String?) async throws -> Bool {
@@ -102,7 +361,8 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..acb44e1e04cf1262b30b684b017af70b
 +          let rows = try JSONSerialization.jsonObject(with: rowsData) as? [[String: Any]],
 +          let row = rows.first, row["id"] as? String == capture.actionId,
 +          let payload = row["payload"] as? [String: Any],
-+          payload["type"] as? String == "text-input" else {
++          (payload["type"] as? String == "text-input" || payload["type"] as? String == "vd-agent" ||
++           (payload["type"] as? String == "http" && payload["captureText"] as? Bool == true)) else {
 +      throw NSError(domain: "HandyNoteCapture", code: 1, userInfo: [
 +        NSLocalizedDescriptionKey: "Refresh Handy Actions to rebuild this note action."
 +      ])
@@ -120,23 +380,30 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..acb44e1e04cf1262b30b684b017af70b
 +
 +    // Local replies are persisted by Notifee's native response callback. App
 +    // deep-link destinations retain foreground handoff; never switch silently.
-+    let localSave = capture.localSave == true
-+    let selectedCategory = localSave ? "handy-text-input-local-v1" : categoryID
++    let localSave = capture.localSave == true && payload["type"] as? String == "text-input"
++    let backgroundRequest = capture.backgroundRequest == true && (
++      (payload["type"] as? String == "http" && payload["captureText"] as? Bool == true) ||
++      (payload["type"] as? String == "vd-agent" && payload["session"] is [String: Any])
++    )
++    let selectedCategory = localSave ? "handy-text-input-local-v1" : backgroundRequest ? "handy-text-input-background-v1" : categoryID
 +    let reply = UNTextInputNotificationAction(
-+      identifier: "handy-input-submit", title: "Add Note", options: localSave ? [] : [.foreground],
++      identifier: "handy-input-submit", title: "Add Note", options: localSave || backgroundRequest ? [] : [.foreground],
 +      textInputButtonTitle: localSave ? "Save" : "Send", textInputPlaceholder: "Write a note…"
 +    )
++    let editor = UNNotificationAction(identifier: "handy-open-editor", title: "Open editor", options: [.foreground])
 +    let category = UNNotificationCategory(
-+      identifier: selectedCategory, actions: [reply], intentIdentifiers: [], options: []
++      identifier: selectedCategory, actions: [reply, editor], intentIdentifiers: [], options: []
 +    )
 +    var categories = await center.notificationCategories()
 +    categories = Set(categories.filter { $0.identifier != selectedCategory })
 +    categories.insert(category)
++    categories = Set(categories.filter { $0.identifier != "handy-action-editor-v1" })
++    categories.insert(UNNotificationCategory(identifier: "handy-action-editor-v1", actions: [editor], intentIdentifiers: [], options: []))
 +    if localSave {
 +      let retry = UNNotificationAction(identifier: "handy-local-retry", title: "Retry save", options: [])
 +      categories = Set(categories.filter { $0.identifier != "handy-text-input-local-recovery-v1" })
 +      categories.insert(UNNotificationCategory(
-+        identifier: "handy-text-input-local-recovery-v1", actions: [retry, reply], intentIdentifiers: [], options: []
++        identifier: "handy-text-input-local-recovery-v1", actions: [retry, reply, editor], intentIdentifiers: [], options: []
 +      ))
 +    }
 +    center.setNotificationCategories(categories)
@@ -149,6 +416,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..acb44e1e04cf1262b30b684b017af70b
 +      "submissionId": submissionID, "actions": capture.actions
 +    ]
 +    if localSave { data["localNoteDestination"] = "1" }
++    if backgroundRequest { data["backgroundRequest"] = "1" }
 +    let notification: [String: Any] = [
 +      "id": notificationID, "title": capture.title, "body": body, "data": data,
 +      "ios": ["categoryId": selectedCategory, "foregroundPresentationOptions": [
@@ -170,15 +438,23 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..acb44e1e04cf1262b30b684b017af70b
 +  }
 +}
 diff --git a/ios/WidgetsModule.swift b/ios/WidgetsModule.swift
-index b1b4295e22726e6fe501aa5e514b56061dea57a1..69058660d8e634d7e5a35c49c960836ee9d03e46 100644
+index b1b4295e22726e6fe501aa5e514b56061dea57a1..d4bc4bb382e310d8803634b737a517e70a7e4e2b 100644
 --- a/ios/WidgetsModule.swift
 +++ b/ios/WidgetsModule.swift
-@@ -17,6 +17,14 @@ public final class WidgetsModule: Module {
+@@ -17,6 +17,22 @@ public final class WidgetsModule: Module {
  
      Events(onPushToStartTokenReceived, onTokenReceived, onUserInteraction)
  
 +    AsyncFunction("readHandyNoteInbox") { () -> [[String: Any]] in
 +      try HandyNoteInbox.read()
++    }
++
++    AsyncFunction("readHandyActionInbox") { () -> [[String: Any]] in
++      try HandyBackgroundDelivery.readInbox()
++    }
++
++    AsyncFunction("acknowledgeHandyAction") { (id: String) in
++      try HandyBackgroundDelivery.acknowledge(id)
 +    }
 +
 +    AsyncFunction("acknowledgeHandyNote") { (id: String) in

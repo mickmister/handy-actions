@@ -11,9 +11,10 @@ import {
   consumeInitialNotification,
   registerNotificationEvents,
   setNotificationPressHandler,
-  resumePendingNote,
 } from '@/src/core/handyNotifications';
 import { HandyStateProvider } from '@/src/hooks/HandyStateProvider';
+import { importCapturedActions } from '@/src/core/handyNotes';
+import { saveEditorDraft } from '@/src/core/editorDrafts';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -61,7 +62,11 @@ function RootLayoutNav() {
       if (target.type === 'input') {
         if (routedSubmissions.current.has(target.submissionId)) return;
         routedSubmissions.current.add(target.submissionId);
-        router.push({ pathname: '/capture', params: { submissionId: target.submissionId } });
+        router.push({ pathname: '/capture', params: { submissionId: target.submissionId, submit: target.submit?'1':'0' } });
+        return;
+      }
+      if(target.type==='editor') {
+        router.push({pathname:'/capture',params:{draftId:target.draftId}});
         return;
       }
       if (target.type === 'preset') {
@@ -71,16 +76,16 @@ function RootLayoutNav() {
       if (target.action.payload.type === 'qr') {
         router.push({ pathname: '/qr', params: { title: target.action.name, value: target.action.payload.value } });
       }
-      if (target.action.payload.type === 'text-input') {
-        router.push({ pathname: '/capture', params: { actionId: target.action.id, presetId: target.presetId } });
+      if (target.action.payload.type !== 'qr') {
+        void saveEditorDraft(target.action,'',target.presetId).then(draft=>router.push({pathname:'/capture',params:{draftId:draft.id,submit:'1'}})).catch(console.warn);
       }
     });
 
     void configureNotificationSurface().catch(console.warn);
     void consumeInitialNotification().catch(console.warn);
-    void resumePendingNote().catch(console.warn);
+    void importCapturedActions().catch(console.warn);
     const appStateSubscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void resumePendingNote().catch(console.warn);
+      if (state === 'active') void importCapturedActions().catch(console.warn);
     });
     const unsubscribe = registerNotificationEvents();
     return () => { unsubscribe(); appStateSubscription.remove(); };

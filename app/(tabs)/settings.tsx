@@ -5,6 +5,7 @@ import { Link } from 'expo-router';
 import { getNotificationStatus, requestNotificationAccess, syncPresetNotifications } from '@/src/core/handyNotifications';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 import { enabledPresets, surfaceSettings, type SurfaceSettings } from '@/src/core/handyModel';
+import { themeOptions } from '@/src/core/handyThemes';
 
 export default function SettingsScreen() {
   const handy = useHandyStateContext();
@@ -83,6 +84,24 @@ export default function SettingsScreen() {
           <Text style={styles.copy}>Circular and inline open the first action; rectangular shows two. Live Activities show three plus All actions. iOS controls widget refresh timing and placement. Live Activities expire and must be refreshed.</Text>
         </> : null}
         <Text style={styles.copy}>{handy.message}</Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Live Activity theme</Text>
+        {themeOptions.map(theme=><Pressable key={theme.id} disabled={!handy.loaded||syncing} style={[styles.card,{backgroundColor:theme.colors[0],borderColor:(handy.state.theme??'psychedelic')===theme.id?'#38BDF8':'transparent',borderWidth:3}]} onPress={()=>{
+          setSyncing(true);
+          void handy.updateTheme(theme.id).then(async result=>{if(!result.ok)throw new Error(result.message);handy.setMessage(await syncPresetNotifications({...handy.state,theme:theme.id}));}).catch(()=>Alert.alert('Theme','Could not apply the theme.')).finally(()=>setSyncing(false));
+        }}><Text style={{color:theme.id==='paper'?'#172D36':'#F8FAFC',fontWeight:'800'}}>{theme.name}{(handy.state.theme??'psychedelic')===theme.id?' ✓':''}</Text>
+          <View style={styles.buttonRow}>{theme.colors.map(color=><View key={color} style={{backgroundColor:color,width:36,height:20,borderRadius:6,borderWidth:1,borderColor:'#94A3B8'}} />)}</View>
+          <Text style={{color:theme.id==='paper'?'#475569':'#D3DFEB'}}>{theme.description}</Text>
+        </Pressable>)}
+        <Text style={styles.copy}>Global theme for Live Activities. Color changes happen on app-requested updates; continuous background animation is not available here. Always-On uses a subdued palette. No repeating animation is used.</Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Connections</Text>
+        <Link href="/origins">Manage secure origins and HTTP headers</Link>
+        <Text style={styles.copy}>Connections stay in secure storage and are excluded from preset exports. Imported remote actions must be reconnected locally.</Text>
       </View>
 
       <View style={styles.card}>
