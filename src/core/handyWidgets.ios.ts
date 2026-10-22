@@ -1,7 +1,8 @@
 import * as ExpoLinking from 'expo-linking';
 
-import { surfaceSettings, widgetPreset, type HandyState } from './handyModel';
+import { isInputPayload, surfaceSettings, widgetPreset, type HandyState } from './handyModel';
 import HandyActionsWidget from '../widgets/HandyActionsWidget';
+import { nativeCaptureTarget } from './nativeCaptureTarget';
 
 export async function syncLockScreenWidget(state: HandyState): Promise<void> {
   const preset = widgetPreset(state);
@@ -14,7 +15,8 @@ export async function syncLockScreenWidget(state: HandyState): Promise<void> {
     }),
     actions: enabled ? preset.actions.slice(0, 3).map((action) => ({
       title: action.name,
-      url: ExpoLinking.createURL('/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: action.payload.type === 'text-input' ? '1' : '0' } }),
+      url: ExpoLinking.createURL('/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: isInputPayload(action.payload) ? '1' : '0' } }),
+      captureTarget: nativeCaptureTarget(preset.id, action),
     })) : [],
   });
 }

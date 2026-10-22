@@ -38,6 +38,7 @@ import { saveEditorDraft } from './editorDrafts';
 import { request } from './requests';
 import { httpRequestSpec } from './httpActions';
 import { nativeActionInbox } from './nativeActionInbox';
+import { isRefreshPress, REFRESH_NOTIFICATION_ID, REFRESH_PRESS_ID } from './lockScreenRefresh';
 
 const CHANNEL_ID = 'handy-actions';
 const INPUT_CATEGORY = 'handy-text-input';
@@ -60,6 +61,7 @@ export type NotificationPressTarget =
   | { type: 'action'; action: HandyAction; presetId?: string }
   | { type: 'input'; submissionId: string; submit?: boolean }
   | { type: 'editor'; draftId: string }
+  | { type: 'refresh'; token: string }
   | { type: 'preset'; presetId: string };
 
 export type NotificationStatus = {
@@ -109,8 +111,8 @@ export async function configureNotificationSurface(): Promise<void> {
   }
 }
 
-export function syncPresetNotifications(state: HandyState): Promise<string> {
-  const sync = syncQueue.then(() => syncSurfaces(state));
+export function syncPresetNotifications(state: HandyState, options: { renewActivities?: boolean } = {}): Promise<string> {
+  const sync = syncQueue.then(() => syncSurfaces(state, options.renewActivities === true));
   syncQueue = sync.catch(() => {});
   return sync;
 }
@@ -118,6 +120,7 @@ export function syncPresetNotifications(state: HandyState): Promise<string> {
 async function configureCategories(state: HandyState): Promise<void> {
   if (Platform.OS !== 'ios') return;
   await notifee.setNotificationCategories([
+    {id:'handy-refresh-lock-screen-v1',actions:[{id:REFRESH_PRESS_ID,title:'Refresh Lock Screen',foreground:true}]},
     {id:'handy-action-editor-v1',actions:[{id:'handy-open-editor',title:'Open editor',foreground:true}]},
     ...(nativeActionInbox?[{id:'handy-text-input-background-v1',actions:[{id:INPUT_PRESS,title:'Send',foreground:false,input:{placeholderText:'Write text…',buttonText:'Send'}},{id:'handy-open-editor',title:'Open editor',foreground:true}]}]:[]),
     { id: INPUT_CATEGORY, actions: [{ id: INPUT_PRESS, title: 'Add Note', foreground: true,
@@ -142,12 +145,12 @@ async function configureCategories(state: HandyState): Promise<void> {
   ]);
 }
 
-async function syncSurfaces(state: HandyState): Promise<string> {
+async function syncSurfaces(state: HandyState, renew: boolean): Promise<string> {
   currentState = state;
   const settings = surfaceSettings(state);
   const messages: string[] = [];
   try {
-    await syncPresetLiveActivities(state);
+    await syncPresetLiveActivities(state, renew);
     if (Platform.OS === 'ios') messages.push(settings.liveActivities ? 'Live Activities refreshed.' : 'Live Activities off.');
   } catch (error) { messages.push(`Live Activity: ${errorMessage(error)}`); }
   try {
@@ -202,6 +205,22 @@ async function syncSurfaces(state: HandyState): Promise<string> {
     presets.length === 1 ? 'Showing 1 enabled preset notification.' : `Showing ${presets.length} enabled preset notifications.`;
   messages.push(notificationMessage);
   } catch (error) { messages.push(`Notifications: ${errorMessage(error)}`); }
+  // Independent of preset panels, with a stable ID outside panel/capture cleanup.
+  try {
+    await configureNotificationSurface();
+    const permission = await getNotificationStatus();
+    if (permission.permission === 'authorized' || permission.permission === 'provisional') {
+      await notifee.displayNotification({
+        id: REFRESH_NOTIFICATION_ID, title: 'Refresh Lock Screen',
+        body: 'Tap to recreate Live Activities and refresh your enabled lock-screen actions.',
+        data: {refreshLockScreen:'1',refreshToken:makeId('refresh')},
+        android: {channelId:CHANNEL_ID,ongoing:true,autoCancel:false,onlyAlertOnce:true,localOnly:true,
+          pressAction:{id:REFRESH_PRESS_ID,launchActivity:'default'}},
+        ios: {categoryId:'handy-refresh-lock-screen-v1',foregroundPresentationOptions:{banner:false,list:true,sound:false,badge:false}},
+      });
+      messages.push('Refresh notification ready.');
+    } else messages.push('Allow notifications to keep the Refresh Lock Screen control.');
+  } catch { messages.push('Could not post the Refresh Lock Screen notification.'); }
   return messages.join(' ');
 }
 
@@ -235,6 +254,10 @@ export async function handleNotificationEvent(event: Event): Promise<void> {
 }
 
 async function openPressAction(pressId: unknown, data: unknown, input?: string, notificationId?: string): Promise<void> {
+  if (isRefreshPress(pressId, data, notificationId)) {
+    deliverPressTarget({type:'refresh',token:dataString(data,'refreshToken')??makeId('refresh')});
+    return;
+  }
   const sourcePresetId = dataString(data, 'presetId');
   const captureActionId = dataString(data, 'captureActionId');
   const actionId = pressId === INPUT_PRESS ? captureActionId : typeof pressId === 'string' ? actionIdFromPressId(pressId) : undefined;

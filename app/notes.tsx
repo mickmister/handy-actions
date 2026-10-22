@@ -1,15 +1,58 @@
-import { Link, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Link, Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
 import { noteStyles as styles } from '@/components/NoteComposer';
-import { completeNote, loadNotes, saveNote, type HandyNote } from '@/src/core/handyNotes';
+import { completeNote, editNote, loadNotes, saveNote, setNoteStatus, type HandyNote } from '@/src/core/handyNotes';
+import { Choice, Field } from '@/components/FormControls';
+import { RemoteActionEditor } from '@/components/RemoteActionEditor';
+import { makeId, validateHandyState, type AgentActionPayload, type HandyAction } from '@/src/core/handyModel';
+import { saveEditorDraft } from '@/src/core/editorDrafts';
+import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 
 export default function NotesScreen() {
+  const router=useRouter();
+  const handy=useHandyStateContext();
   const params = useLocalSearchParams<{ text?: string; submissionId?: string }>();
   const [notes, setNotes] = useState<HandyNote[]>([]);
   const [message, setMessage] = useState('');
   const saved = useRef('');
+  const [view,setView]=useState<'unaddressed'|'completed'>('unaddressed');
+  const [editing,setEditing]=useState<string>();
+  const [text,setText]=useState('');
+  const [choosingAgent,setChoosingAgent]=useState(false);
+  const [custom,setCustom]=useState(false);
+  const [payload,setPayload]=useState<AgentActionPayload>({type:'vd-agent',originId:'',prefix:''});
+  const [busy,setBusy]=useState(false);
+  const visible=notes.filter(note=>(note.status??'unaddressed')===view);
+  const agentActions=handy.state.presets.flatMap(preset=>preset.actions.filter(action=>action.payload.type==='vd-agent').map(action=>({preset,action})));
+
+  async function saveEdit() {
+    if(!editing)return;
+    setBusy(true);
+    try {await editNote(editing,text);setNotes(await loadNotes());setMessage('Note updated.');setEditing(undefined);setChoosingAgent(false);}
+    catch(error){setMessage(error instanceof Error?error.message:'Could not update note.');}
+    finally{setBusy(false);}
+  }
+  async function changeStatus(note:HandyNote) {
+    setBusy(true);
+    try {await setNoteStatus(note.id,note.status==='completed'?'unaddressed':'completed');setNotes(await loadNotes());}
+    catch{setMessage('Could not update note status.');}
+    finally{setBusy(false);}
+  }
+  async function sendToAgent(action:HandyAction,presetId?:string) {
+    if(!editing||busy)return;
+    const validation=validateHandyState({presets:[{id:'handoff',name:'Handoff',enabled:false,actions:[action]}]});
+    if(!validation.ok){setMessage(validation.errors.join('\n'));return;}
+    setBusy(true);
+    try {
+      await editNote(editing,text);
+      const draft=await saveEditorDraft(action,text,presetId,undefined,{sourceNoteId:editing});
+      router.push({pathname:'/capture',params:{draftId:draft.id}});
+      setEditing(undefined);setChoosingAgent(false);setCustom(false);
+    } catch {setMessage('Could not prepare the agent draft. Your source note is retained.');}
+    finally{setBusy(false);}
+  }
   useFocusEffect(useCallback(() => {
     let cancelled = false;
     void (async () => {
@@ -27,16 +70,34 @@ export default function NotesScreen() {
   }, [params.text, params.submissionId]));
 
   return <>
-    <Stack.Screen options={{ title: 'Notes' }} />
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Notes</Text>
-      <Text style={styles.copy}>Notes sent to Handy Actions stay on this device.</Text>
+    <Stack.Screen options={{ title: 'Notes inbox' }} />
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <Text style={styles.title}>Notes inbox</Text>
+      <Text style={styles.copy}>Capture now, refine later. Sending or queueing a note to an agent completes it.</Text>
+      <View style={{flexDirection:'row',gap:12}}>{(['unaddressed','completed'] as const).map(status=><Choice key={status} label={`${status==='unaddressed'?'Unaddressed':'Completed'} (${notes.filter(note=>(note.status??'unaddressed')===status).length})`} selected={view===status} disabled={busy} onPress={()=>{setView(status);setEditing(undefined);setChoosingAgent(false);}} />)}</View>
       <Link href="/pending-notes">Recover unsent notes</Link>
       {message ? <Text style={styles.copy}>{message}</Text> : null}
-      {!notes.length ? <Text style={styles.copy}>No notes yet. Add a text-input action with “Use this app” as its destination.</Text> : null}
-      {notes.map((note) => <View key={note.id} style={styles.card}>
-        <Text selectable style={{ fontSize: 17, color: '#0f172a' }}>{note.text}</Text>
+      {!visible.length ? <Text style={styles.copy}>{view==='completed'?'No completed notes.':'No unaddressed notes. Capture a note with “Use this app” as its destination.'}</Text> : null}
+      {visible.map((note) => <View key={note.id} style={styles.card}>
+        {editing===note.id?<>
+          <Field label="Edit note" multiline value={text} onChangeText={setText} editable={!busy} />
+          <Choice label="Save edits" disabled={busy||!text.trim()} onPress={()=>void saveEdit()} />
+          <Choice label="Cancel editing" disabled={busy} onPress={()=>{setEditing(undefined);setChoosingAgent(false);setCustom(false);}} />
+          <Choice label="Turn into agent action…" disabled={busy||!text.trim()} onPress={()=>setChoosingAgent(true)} />
+          {choosingAgent?<View style={styles.card}>
+            <Text style={styles.copy}>Choose an agent action. You will review the prompt and destination before sending.</Text>
+            {agentActions.map(({preset,action})=><Choice key={`${preset.id}:${action.id}`} label={`${preset.name} / ${action.name}`} disabled={busy} onPress={()=>void sendToAgent(action,preset.id)} />)}
+            <Choice label="Choose connection / session…" disabled={busy} onPress={()=>setCustom(true)} />
+            {custom?<><RemoteActionEditor value={payload} onChange={next=>{if(next.type==='vd-agent')setPayload(next);}} />
+              <Choice label="Review agent prompt" disabled={busy||!payload.originId} onPress={()=>void sendToAgent({id:makeId('note-agent'),name:'Send note to agent',payload})} /></>:null}
+          </View>:null}
+        </>:<>
+          <Text selectable style={{ fontSize: 17, color: '#0f172a' }}>{note.text}</Text>
+          <Choice label="Edit / send to agent" disabled={busy} onPress={()=>{setEditing(note.id);setText(note.text);setChoosingAgent(false);setCustom(false);}} />
+          <Choice label={note.status==='completed'?'Reopen note':'Mark completed'} disabled={busy} onPress={()=>void changeStatus(note)} />
+        </>}
         <Text style={styles.copy}>{new Date(note.createdAt).toLocaleString()}</Text>
+        {note.handoff?<Text style={styles.copy}>{note.handoff.kind==='queued'?'Queued':'Sent'} to {note.handoff.sessionLabel} · {new Date(note.handoff.acceptedAt).toLocaleString()}</Text>:null}
       </View>)}
     </ScrollView>
   </>;

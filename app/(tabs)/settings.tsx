@@ -81,7 +81,7 @@ export default function SettingsScreen() {
               <Text style={styles.secondaryButtonText}>{preset.name}</Text>
             </Pressable>)}
           </View>
-          <Text style={styles.copy}>Circular and inline open the first action; rectangular shows two. Live Activities show three plus All actions. iOS controls widget refresh timing and placement. Live Activities expire and must be refreshed.</Text>
+          <Text style={styles.copy}>On iOS 17+, circular and rectangular input buttons post native capture notifications; inline widgets and older iOS use app-opening links. Rectangular shows two actions; Live Activities show three plus All actions. iOS controls refresh timing and placement.</Text>
         </> : null}
         <Text style={styles.copy}>{handy.message}</Text>
       </View>
@@ -113,6 +113,7 @@ export default function SettingsScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Notifications</Text>
         <Text style={styles.copy}>{status}</Text>
+        <Text style={styles.copy}>Each lock-screen update keeps a Refresh Lock Screen notification, even when preset panels are off. Tap it to recreate expired Live Activities. iOS notifications remain dismissible; refreshing in the app restores the control.</Text>
         <View style={styles.buttonRow}>
           <Pressable style={styles.secondaryButton} onPress={checkPermission}>
             <Text style={styles.secondaryButtonText}>Check permission</Text>

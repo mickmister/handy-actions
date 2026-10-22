@@ -59,6 +59,13 @@ function RootLayoutNav() {
 
   useEffect(() => {
     setNotificationPressHandler((target) => {
+      if(target.type==='refresh') {
+        const key=`refresh:${target.token}`;
+        if(routedSubmissions.current.has(key))return;
+        routedSubmissions.current.add(key);
+        router.push({pathname:'/refresh-lock-screen',params:{token:target.token}});
+        return;
+      }
       if (target.type === 'input') {
         if (routedSubmissions.current.has(target.submissionId)) return;
         routedSubmissions.current.add(target.submissionId);

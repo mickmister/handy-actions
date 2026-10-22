@@ -437,6 +437,31 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..d6e42397e61ecdd7607cb8756632c554
 +    return true
 +  }
 +}
+diff --git a/ios/Widgets/Buttons.swift b/ios/Widgets/Buttons.swift
+index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..8a0d4265be0b719238ced23669872c431ae000e2 100644
+--- a/ios/Widgets/Buttons.swift
++++ b/ios/Widgets/Buttons.swift
+@@ -16,5 +16,12 @@ struct WidgetButtonView: ExpoSwiftUI.View {
++  @ViewBuilder
+   var body: some View {
+-    SwiftUI.Button(
++    if props.target?.hasPrefix("handy-note-capture-v1:") == true {
++      // LiveActivityIntent executes in the host app process, where notification
++      // permission/categories belong. Do not schedule from the widget extension
++      // or depend on React being alive. Other widget targets keep their intent.
++      LiveActivityButtonView(props: props)
++    } else {
++      SwiftUI.Button(
+       role: props.role?.toNativeRole(),
+       intent: WidgetUserInteraction(
+         source: props.source,
+@@ -33,5 +40,6 @@ struct WidgetButtonView: ExpoSwiftUI.View {
+         Children()
+       }
+     }
++    }
+   }
+ }
 diff --git a/ios/WidgetsModule.swift b/ios/WidgetsModule.swift
 index b1b4295e22726e6fe501aa5e514b56061dea57a1..d4bc4bb382e310d8803634b737a517e70a7e4e2b 100644
 --- a/ios/WidgetsModule.swift
