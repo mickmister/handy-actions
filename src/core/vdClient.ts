@@ -25,7 +25,7 @@ export function createVdClient(request: ApiRequest, originId: string) {
   };
   const queue = (sessionId: string) => api<QueueStatus>(`/api/sessions/${encodeURIComponent(sessionId)}/queue`);
   return {
-    async workspaces() { return (await api<Workspace[]>('/api/workspaces')).filter(w => !w.archived && !w.worktree_deleted).sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at)); },
+    async workspaces() { return (await api<Workspace[]>('/api/workspaces', { cache: 'no-store' })).filter(w => !w.archived && !w.worktree_deleted).sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at)); },
     sessions: (id: string) => api<Session[]>(`/api/sessions?workspace_id=${encodeURIComponent(id)}`),
     tags: () => api<Tag[]>('/api/tags'),
     queue,

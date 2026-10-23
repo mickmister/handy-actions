@@ -1,6 +1,6 @@
 import { originUrl, type OriginProfile } from './originRepository.ts';
 
-export type RequestSpec = { method?: string; body?: string; contentType?: string; diagnostics?: boolean };
+export type RequestSpec = { method?: string; body?: string; contentType?: string; diagnostics?: boolean; cache?: 'no-store' };
 export type Transport = (url: string, init: RequestInit) => Promise<Response>;
 export class RequestFailure extends Error {
   status?: number;
@@ -38,11 +38,11 @@ export function createRequestClient(resolve: (id: string) => Promise<OriginProfi
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 20000);
     try {
-      const headers: Record<string, string> = { ...(spec.diagnostics ? {'cache-control':'no-cache'} : {}), ...(spec.contentType ? { 'content-type': spec.contentType } : {}) };
+      const headers: Record<string, string> = { ...(spec.diagnostics || spec.cache === 'no-store' ? {'cache-control':'no-cache'} : {}), ...(spec.contentType ? { 'content-type': spec.contentType } : {}) };
       for (const h of profile.headers) headers[h.name.toLowerCase()] = h.value;
       // Expo fetch implements redirect:error natively on both iOS and Android.
       const response = await transport(url, { method: spec.method ?? 'GET', headers, body: spec.body, redirect: 'error', credentials: 'omit', signal: controller.signal,
-        ...(spec.diagnostics ? {cache:'no-store' as const} : {}) });
+        ...(spec.diagnostics || spec.cache === 'no-store' ? {cache:'no-store' as const} : {}) });
       if (spec.diagnostics) {
         const body = await response.text();
         const status = diagnosticText(`HTTP ${response.status} ${response.statusText}`,profile).trim();

@@ -129,6 +129,8 @@ export function useHandyState() {
 
   const updateSurfaces = (surfaces: SurfaceSettings) => persist({ ...state, surfaces }, 'Lock-screen settings saved.');
   const updateTheme = (theme: NonNullable<HandyState['theme']>) => persist({...state,theme},'Theme saved.');
+  const updateRecentWorkspaces = (recentWorkspaces: NonNullable<HandyState['recentWorkspaces']>) =>
+    persist({ ...state, recentWorkspaces }, 'Recent VD workspaces settings saved.');
   const updateAction = (presetId: string, actionId: string, name: string, payload: HandyActionPayload) =>
     persist({ ...state, presets: state.presets.map((preset) => preset.id === presetId
       ? { ...preset, actions: preset.actions.map((action) => action.id === actionId ? { ...action, name: name.trim() || 'Untitled action', payload } : action) }
@@ -148,6 +150,7 @@ export function useHandyState() {
     exportText,
     updateSurfaces,
     updateTheme,
+    updateRecentWorkspaces,
     updateAction,
   };
 }

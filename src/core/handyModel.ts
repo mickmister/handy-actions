@@ -59,6 +59,7 @@ export type HandyPreset = {
 
 export type HandyState = {
   presets: HandyPreset[];
+  recentWorkspaces?: { enabled: boolean; originId: string };
   surfaces?: SurfaceSettings;
   theme?: 'psychedelic' | 'midnight' | 'paper';
 };
@@ -128,6 +129,10 @@ export function normalizeHandyState(value: unknown): HandyState {
   }
 
   return {
+    ...(isRecord(value.recentWorkspaces) ? { recentWorkspaces: {
+      enabled: value.recentWorkspaces.enabled === true,
+      originId: typeof value.recentWorkspaces.originId === 'string' ? value.recentWorkspaces.originId : '',
+    } } : {}),
     ...(isRecord(value) && ['psychedelic', 'midnight', 'paper'].includes(String(value.theme)) ? { theme: value.theme as HandyState['theme'] } : {}),
     ...(isRecord(value.surfaces) ? { surfaces: {
       liveActivities: value.surfaces.liveActivities !== false,
@@ -164,6 +169,12 @@ export function validateHandyState(state: unknown): ValidationResult {
   }
 
   const presetIds = new Set<string>();
+  if (state.recentWorkspaces !== undefined) {
+    const settings = state.recentWorkspaces;
+    if (!isRecord(settings) || typeof settings.enabled !== 'boolean' || typeof settings.originId !== 'string') {
+      errors.push('recentWorkspaces must contain an enabled boolean and an originId string.');
+    }
+  }
   if(state.theme!==undefined && !['psychedelic','midnight','paper'].includes(String(state.theme)))errors.push('theme must be psychedelic, midnight or paper.');
   if (state.surfaces !== undefined) {
     const settings = state.surfaces;

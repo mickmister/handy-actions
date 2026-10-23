@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useFocusEffect } from 'expo-router';
 
 import { getNotificationStatus, requestNotificationAccess, syncPresetNotifications } from '@/src/core/handyNotifications';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 import { enabledPresets, surfaceSettings, type SurfaceSettings } from '@/src/core/handyModel';
 import { themeOptions } from '@/src/core/handyThemes';
+import { origins } from '@/src/core/origins';
 
 export default function SettingsScreen() {
   const handy = useHandyStateContext();
@@ -13,6 +14,32 @@ export default function SettingsScreen() {
   const [status, setStatus] = useState('Tap Check permission.');
   const [syncing, setSyncing] = useState(false);
   const surfaces = surfaceSettings(handy.state);
+  const recentWorkspaces = handy.state.recentWorkspaces ?? { enabled: false, originId: '' };
+  const [originChoices, setOriginChoices] = useState<{ id: string; name: string }[]>([]);
+  const [originMessage, setOriginMessage] = useState('');
+  useFocusEffect(useCallback(() => {
+    let cancelled = false;
+    void origins.list().then(profiles => {
+      if (!cancelled) {
+        setOriginChoices(profiles.map(({ id, name }) => ({ id, name })));
+        setOriginMessage('');
+      }
+    }).catch(() => {
+      if (!cancelled) { setOriginChoices([]); setOriginMessage('Could not load saved origins.'); }
+    });
+    return () => { cancelled = true; };
+  }, []));
+
+  async function updateRecentWorkspaces(patch: Partial<typeof recentWorkspaces>) {
+    setSyncing(true);
+    try {
+      const next = { ...recentWorkspaces, ...patch };
+      const result = await handy.updateRecentWorkspaces(next);
+      if (!result.ok) throw new Error(result.message);
+      handy.setMessage(await syncPresetNotifications({ ...handy.state, recentWorkspaces: next }));
+    } catch { Alert.alert('Recent VD workspaces', 'Could not apply the workspace list settings.'); }
+    finally { setSyncing(false); }
+  }
 
   async function updateSurface(patch: Partial<SurfaceSettings>) {
     setSyncing(true);
@@ -84,6 +111,36 @@ export default function SettingsScreen() {
           <Text style={styles.copy}>On iOS 17+, circular and rectangular input buttons post native capture notifications; inline widgets and older iOS use app-opening links. Rectangular widgets show two actions; Live Activities arrange all actions in rows of up to two. iOS controls available space, refresh timing and placement.</Text>
         </> : null}
         <Text style={styles.copy}>{handy.message}</Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Recent VD workspaces</Text>
+        <Text style={styles.copy}>Show a separate Lock Screen Live Activity with the three most recently updated workspaces from a saved VD origin. Archived and deleted worktrees are excluded.</Text>
+        <View style={styles.settingRow}>
+          <Text style={styles.copy}>Show recent VD workspaces{Platform.OS !== 'ios' ? ' (iOS only)' : ''}</Text>
+          <Switch accessibilityLabel="Show recent VD workspaces" value={recentWorkspaces.enabled}
+            disabled={!handy.loaded || syncing || Platform.OS !== 'ios' || (!recentWorkspaces.enabled && !originChoices.some(origin => origin.id === recentWorkspaces.originId))}
+            onValueChange={enabled => void updateRecentWorkspaces({ enabled })} />
+        </View>
+        <Text style={styles.copy}>VD origin:</Text>
+        <View style={styles.buttonRow}>
+          {originChoices.map(origin => <Pressable key={origin.id}
+            accessibilityRole="button" accessibilityState={{ selected: recentWorkspaces.originId === origin.id }}
+            disabled={!handy.loaded || syncing || Platform.OS !== 'ios'}
+            style={recentWorkspaces.originId === origin.id ? styles.primaryButton : styles.secondaryButton}
+            onPress={() => void updateRecentWorkspaces({ originId: origin.id })}>
+            <Text style={styles.secondaryButtonText}>{origin.name}</Text>
+          </Pressable>)}
+        </View>
+        {originMessage ? <Text style={styles.copy}>{originMessage}</Text> : null}
+        {!originChoices.some(origin => origin.id === recentWorkspaces.originId) ? <Text style={styles.copy}>Choose a saved VD origin to enable the list.</Text> : null}
+        <Link href="/origins">Manage origins / test VD connection</Link>
+        <Text style={styles.copy}>Tap a workspace name to open its origin’s /workspaces/:workspaceId page in your browser. Browser authentication is separate from the app’s saved API headers.</Text>
+        <Text style={styles.copy}>Refreshes when the app opens or returns to the foreground, and when you refresh Lock Screen surfaces. Live Activities must also be enabled above.</Text>
+        <Pressable style={styles.darkButton} disabled={!handy.loaded || syncing || Platform.OS !== 'ios'} onPress={() => void updateRecentWorkspaces({})}>
+          <Text style={styles.darkButtonText}>{syncing ? 'Applying…' : 'Refresh recent workspaces'}</Text>
+        </Pressable>
+        <Text accessibilityLiveRegion="polite" style={styles.copy}>{handy.message}</Text>
       </View>
 
       <View style={styles.card}>
