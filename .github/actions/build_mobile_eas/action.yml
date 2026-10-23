@@ -97,9 +97,9 @@ runs:
         EXPO_TOKEN: ${{ inputs.expo-token }}
       run: |
         if [[ "${{ inputs.output_logs }}" != "true" ]]; then
-          exec >/dev/null 2>&1
+          exec 2>/dev/null
         fi
-        pnpm exec eas build --non-interactive --wait --platform=${{ inputs.platform }} --profile=${{ inputs.profile }}
+        pnpm exec eas build --non-interactive --wait --json --platform=${{ inputs.platform }} --profile=${{ inputs.profile }} > "$RUNNER_TEMP/eas-build.json"
 
     - name: Build and submit
       if: ${{ inputs.local != 'true' && inputs.submit == 'true' && inputs.profile == 'production' }}
@@ -109,6 +109,20 @@ runs:
         EXPO_TOKEN: ${{ inputs.expo-token }}
       run: |
         if [[ "${{ inputs.output_logs }}" != "true" ]]; then
-          exec >/dev/null 2>&1
+          exec 2>/dev/null
         fi
-        pnpm exec eas build --non-interactive --wait --auto-submit --platform=${{ inputs.platform }} --profile=${{ inputs.profile }}
+        pnpm exec eas build --non-interactive --wait --json --auto-submit --platform=${{ inputs.platform }} --profile=${{ inputs.profile }} > "$RUNNER_TEMP/eas-build.json"
+
+    - name: Publish EAS build links
+      if: ${{ inputs.local != 'true' }}
+      shell: bash
+      run: node .github/scripts/eas-build-summary.cjs "$RUNNER_TEMP/eas-build.json"
+
+    - name: Save EAS build metadata
+      if: ${{ inputs.local != 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: eas-build-${{ inputs.platform }}
+        path: ${{ runner.temp }}/eas-build.json
+        if-no-files-found: error
+        retention-days: 7
