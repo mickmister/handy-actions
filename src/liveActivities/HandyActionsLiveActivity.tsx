@@ -33,7 +33,9 @@ const HandyActionsActivity = (props: HandyActionsLiveActivityProps, environment:
         padding({ horizontal: 10, vertical: 6 }), frame({ minWidth: 0, maxWidth: 10000, height: 44 }),
         background(subdued ? '#111A20' : onDark ? (dark ? props.theme?.tile ?? '#1A2931' : '#1A2931') : props.theme?.tile ?? '#E5EDEF'), cornerRadius(14),
       ]}>
-        <Image systemName={action.captureTarget ? 'square.and.pencil' : 'arrow.up.right'} color={highlight} size={14} />
+        {action.siteGlyph
+          ? <Text modifiers={[font({ family: 'FontAwesome6Brands-Regular', size: 16 }), foregroundStyle(highlight)]}>{action.siteGlyph}</Text>
+          : <Image systemName={action.captureTarget ? 'square.and.pencil' : 'arrow.up.right'} color={highlight} size={14} />}
         <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(2), frame({ minWidth: 0, maxWidth: 10000, alignment: 'leading' })]}>{action.title}</Text>
       </HStack>;
       const modifiers = [frame({ minWidth: 0, maxWidth: 10000 })];

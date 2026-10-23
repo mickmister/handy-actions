@@ -8,6 +8,7 @@ import { Link } from 'expo-router';
 import * as ExpoLinking from 'expo-linking';
 import { RemoteActionEditor } from '@/components/RemoteActionEditor';
 import { isInputPayload } from '@/src/core/handyModel';
+import { ActionIcon } from '@/components/ActionIcon';
 
 type PayloadType = HandyActionPayload['type'];
 
@@ -116,6 +117,7 @@ export default function ActionsScreen() {
           {selectedPreset?.actions.map((action) => (
             <View key={action.id} style={styles.card}>
               <View style={styles.row}>
+                <ActionIcon payload={action.payload} />
                 <View style={styles.flex}>
                   <Text style={styles.cardTitle}>{action.name}</Text>
                   <Text style={styles.meta}>{JSON.stringify(action.payload)}</Text>

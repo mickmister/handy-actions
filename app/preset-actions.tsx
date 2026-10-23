@@ -4,6 +4,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { runActionPayload, syncPresetNotifications } from '@/src/core/handyNotifications';
 import { isInputPayload, type HandyAction } from '@/src/core/handyModel';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
+import { ActionIcon } from '@/components/ActionIcon';
 
 export default function PresetActionsScreen() {
   const router = useRouter();
@@ -55,6 +56,7 @@ export default function PresetActionsScreen() {
         {preset?.actions.map((action) => (
           <View key={action.id} style={styles.card}>
             <View style={styles.row}>
+              <ActionIcon payload={action.payload} />
               <View style={styles.flex}>
                 <Text style={styles.cardTitle}>{action.name}</Text>
                 <Text style={styles.meta}>{actionSummary(action)}</Text>

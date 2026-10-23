@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "dependencies": {
     "@expo/ui": "~57.0.21",
+    "@expo/vector-icons": "^15.1.1",
     "@notifee/react-native": "^9.1.8",
     "@react-native-async-storage/async-storage": "^3.1.1",
     "expo": "~57.0.26",
@@ -29,6 +30,7 @@
     "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
+    "@expo/plist": "^0.10.1",
     "@types/node": "^26.6.3",
     "@types/react": "~19.2.2",
     "eas-cli": "^24.8.0",

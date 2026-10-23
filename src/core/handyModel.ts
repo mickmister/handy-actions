@@ -69,7 +69,7 @@ export type NotificationActionRow = {
   payload: HandyActionPayload;
 };
 
-export type LiveActivityActionLink = { title: string; url: string; captureTarget?: string };
+export type LiveActivityActionLink = { title: string; url: string; captureTarget?: string; siteGlyph?: string };
 
 export type HandyActionsLiveActivityProps = {
   presetId: string;

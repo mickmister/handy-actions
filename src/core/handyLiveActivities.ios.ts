@@ -14,6 +14,7 @@ import { activityTheme } from './handyThemes';
 import { isInputPayload } from './handyModel';
 import { nativeCaptureTarget } from './nativeCaptureTarget';
 import { reconcileActivities } from './activityLifecycle';
+import { nativeSiteIcon } from './nativeSiteIcon';
 
 const LIVE_ACTIVITY_STALE_MS = 7.5 * 60 * 60 * 1000;
 
@@ -29,6 +30,7 @@ export async function syncPresetLiveActivities(state: HandyState, renew = false)
     props.theme = activityTheme(state.theme,props.updatedAt);
     props.actionRows = liveActivityActionRowsForPreset(preset, (action) => ({
       title: action.name,
+      siteGlyph: nativeSiteIcon(action.payload),
       url: ExpoLinking.createURL('/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: isInputPayload(action.payload) ? '1' : '0' } }),
       captureTarget: nativeCaptureTarget(preset.id, action),
     }));
