@@ -131,7 +131,12 @@ export default function CaptureScreen() {
     if(params.draftId) {
       void readEditorDraft(params.draftId).then(async draft=>{
         if(started.current!==key)return;
-        if(!draft){setMessage('This draft is no longer available.');return;}
+         if(!draft){setMessage('This draft is no longer available.');return;}
+         if (draft.action.payload.type === 'notes') {
+           await removeEditorDraft(draft.id);
+           router.replace('/notes');
+           return;
+         }
         setSnapshot(draft.action);setText(draft.text);setSelection({start:draft.text.length,end:draft.text.length});
         presetId.current=draft.presetId;
         sourceNoteId.current=draft.sourceNoteId;
@@ -164,7 +169,9 @@ export default function CaptureScreen() {
     const action=findAction(handy.state,String(params.actionId??''),params.presetId)?.action;
     if (!action) { setMessage('This action is no longer available.'); return; }
     setSnapshot(action);
-    if (action.payload.type === 'qr') {
+    if (action.payload.type === 'notes') {
+      router.replace('/notes');
+    } else if (action.payload.type === 'qr') {
       router.replace({ pathname: '/qr', params: { title: action.name, value: action.payload.value } });
     } else if (isInputPayload(action.payload)) {
       if (params.notification === '1') void postInputNotification(action);

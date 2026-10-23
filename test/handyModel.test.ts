@@ -10,6 +10,7 @@ import {
   exportHandyState,
   findAction,
   importHandyState,
+  isInputPayload,
   liveActivityPropsForPreset,
   liveActivityActionRowsForPreset,
   liveActivityCaptureTarget,
@@ -29,6 +30,17 @@ import {
 test('default state starts local and empty', () => {
   const state = defaultHandyState();
   assert.deepEqual(state, { presets: [] });
+});
+
+test('Go to notes survives export, import, and notification snapshots without becoming a capture action', () => {
+  const action = { id: 'notes', name: 'Go to notes', payload: { type: 'notes' as const } };
+  const preset: HandyPreset = { id: 'inbox', name: 'Inbox', enabled: true, actions: [action] };
+  const state: HandyState = { presets: [preset] };
+  assert.equal(validateHandyState(state).ok, true);
+  assert.deepEqual(importHandyState(exportHandyState(state)), state);
+  assert.deepEqual(actionFromNotificationRowsData(action.id, notificationRowsData(preset)), action);
+  assert.equal(isInputPayload(action.payload), false);
+  assert.equal(liveActivityCaptureTarget(preset.id, action), undefined);
 });
 
 test('native capture target preserves scoped destination snapshot and round trips through reply data', () => {

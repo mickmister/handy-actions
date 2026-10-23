@@ -73,12 +73,13 @@ export default function ActionsScreen() {
             <Text style={styles.cardTitle}>{editingId ? 'Edit action' : 'Add action'}</Text>
             <TextInput value={name} onChangeText={setName} placeholder="My LinkedIn" placeholderTextColor="#8792a2" style={styles.input} />
             <View style={styles.chips}>
-              {(['qr', 'web', 'deeplink', 'text-input','http','vd-agent'] as const).map((payloadType) => (
+              {(['notes', 'qr', 'web', 'deeplink', 'text-input','http','vd-agent'] as const).map((payloadType) => (
                 <Pressable
                   key={payloadType}
                   style={type === payloadType ? styles.selectedChip : styles.chip}
                   onPress={() => {
                     setType(payloadType);
+                    if (payloadType === 'notes' && !name.trim()) setName('Go to notes');
                     if(payloadType==='http')setRemote({type:'http',originId:'',path:'/',method:'POST',bodyFormat:'json',body:'{"text":"{text}"}',captureText:true});
                     if(payloadType==='vd-agent')setRemote({type:'vd-agent',originId:'',prefix:''});
                     if (payloadType === 'text-input' && !value) {
@@ -86,11 +87,12 @@ export default function ActionsScreen() {
                       if (!name) setName('Add Note');
                     }
                   }}>
-                  <Text style={type === payloadType ? styles.selectedChipText : styles.chipText}>{payloadType}</Text>
+                  <Text style={type === payloadType ? styles.selectedChipText : styles.chipText}>{payloadType === 'notes' ? 'Go to notes' : payloadType}</Text>
                 </Pressable>
               ))}
             </View>
-            {type!=='http'&&type!=='vd-agent'?<TextInput
+            {type === 'notes' ? <Text style={styles.copy}>Opens this app’s notes inbox. No URL or text input is needed.</Text> : null}
+            {type!=='http'&&type!=='vd-agent'&&type!=='notes'?<TextInput
               value={value}
               onChangeText={setValue}
               autoCapitalize="none"
@@ -124,7 +126,13 @@ export default function ActionsScreen() {
                 </View>
               </View>
               <View style={styles.row}>
-                {action.payload.type === 'qr' ? (
+                {action.payload.type === 'notes' ? (
+                  <Link href="/notes" asChild>
+                    <Pressable style={styles.secondaryButton}>
+                      <Text style={styles.secondaryButtonText}>Go to notes</Text>
+                    </Pressable>
+                  </Link>
+                ) : action.payload.type === 'qr' ? (
                   <Link href={{ pathname: '/qr', params: { title: action.name, value: action.payload.value } }} asChild>
                     <Pressable style={styles.secondaryButton}>
                       <Text style={styles.secondaryButtonText}>Show QR</Text>
@@ -142,7 +150,7 @@ export default function ActionsScreen() {
                 <Pressable onPress={() => {
                   setEditingId(action.id); setName(action.name); setType(action.payload.type);
                   if(action.payload.type==='http'||action.payload.type==='vd-agent')setRemote(action.payload);
-                  else setValue(action.payload.type === 'qr' ? action.payload.value : action.payload.type === 'text-input' ? action.payload.urlTemplate : action.payload.url);
+                  else setValue(action.payload.type === 'notes' ? '' : action.payload.type === 'qr' ? action.payload.value : action.payload.type === 'text-input' ? action.payload.urlTemplate : action.payload.url);
                 }}><Text style={styles.chipText}>Edit</Text></Pressable>
                 <Pressable onPress={() => selectedPreset && void handy.deleteAction(selectedPreset.id, action.id)}>
                   <Text style={styles.deleteText}>Delete</Text>
@@ -157,6 +165,7 @@ export default function ActionsScreen() {
 }
 
 function makePayload(type: PayloadType, value: string): HandyActionPayload {
+  if (type === 'notes') return { type };
   if (type === 'text-input') return { type, urlTemplate: value.trim() };
   if (type === 'web') return { type, url: value.trim() };
   if (type === 'deeplink') {

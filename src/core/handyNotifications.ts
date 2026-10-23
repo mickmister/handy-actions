@@ -238,6 +238,10 @@ export async function consumeInitialNotification(): Promise<void> {
 }
 
 export async function runActionPayload(payload: HandyActionPayload): Promise<void> {
+  if (payload.type === 'notes') {
+    await Linking.openURL(ExpoLinking.createURL('/notes'));
+    return;
+  }
   if (payload.type === 'qr') {
     return;
   }
@@ -268,6 +272,11 @@ async function openPressAction(pressId: unknown, data: unknown, input?: string, 
     // A reply belongs to the destination shown when that notification was posted,
     // even if its action was edited or deleted before the user submits.
     const action = snapshot ?? storedAction;
+    if (action?.payload.type === 'notes') {
+      deliverPressTarget({ type: 'action', action, presetId: sourcePresetId });
+      await syncStoredPresetNotifications();
+      return;
+    }
     if (action && isInputPayload(action.payload)) {
       if (input?.trim()) {
         const submissionId = `${dataString(data, 'submissionId') ?? notificationId ?? makeId('submission')}-${actionId}`;

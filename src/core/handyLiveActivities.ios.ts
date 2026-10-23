@@ -31,7 +31,8 @@ export async function syncPresetLiveActivities(state: HandyState, renew = false)
     props.actionRows = liveActivityActionRowsForPreset(preset, (action) => ({
       title: action.name,
       siteGlyph: nativeSiteIcon(action.payload),
-      url: ExpoLinking.createURL('/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: isInputPayload(action.payload) ? '1' : '0' } }),
+      systemImage: action.payload.type === 'notes' ? 'note.text' : undefined,
+      url: ExpoLinking.createURL(action.payload.type === 'notes' ? '/notes' : '/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: isInputPayload(action.payload) ? '1' : '0' } }),
       captureTarget: nativeCaptureTarget(preset.id, action),
     }));
     return {presetId:preset.id,props,openUrl};

@@ -6,7 +6,7 @@ export type HandyWidgetProps = {
   enabled: boolean;
   presetName: string;
   openUrl: string;
-  actions: { title: string; url: string; captureTarget?: string; siteGlyph?: string }[];
+  actions: { title: string; url: string; captureTarget?: string; siteGlyph?: string; systemImage?: 'note.text' }[];
 };
 
 const HandyActionsWidget = (props: HandyWidgetProps, environment: WidgetEnvironment) => {
@@ -16,7 +16,7 @@ const HandyActionsWidget = (props: HandyWidgetProps, environment: WidgetEnvironm
   const label = ready ? props.actions[0].title : 'Open Handy Actions';
   const icon = (action: HandyWidgetProps['actions'][number]) => action.siteGlyph
     ? <Text modifiers={[font({ family: 'FontAwesome6Brands-Regular', size: 16 })]}>{action.siteGlyph}</Text>
-    : <Image systemName={action.captureTarget ? 'square.and.pencil' : 'link'} size={16} />;
+    : <Image systemName={action.systemImage ?? (action.captureTarget ? 'square.and.pencil' : 'link')} size={16} />;
   if (environment.widgetFamily === 'accessoryInline') {
     // WidgetKit's inline accessory supports a text/link, not an interactive button.
     return <Text modifiers={primaryUrl ? [widgetURL(primaryUrl)] : []}>{ready ? `Open ${label}` : 'Handy Actions · off'}</Text>;

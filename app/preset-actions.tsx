@@ -15,6 +15,10 @@ export default function PresetActionsScreen() {
   const title = !handy.loaded ? 'Loading actions…' : preset?.name ?? 'Preset not found';
 
   async function useAction(action: HandyAction) {
+    if (action.payload.type === 'notes') {
+      router.push('/notes');
+      return;
+    }
     if (isInputPayload(action.payload) || action.payload.type === 'http') {
       router.push({ pathname: '/capture', params: { actionId: action.id, presetId } });
       return;
@@ -64,7 +68,7 @@ export default function PresetActionsScreen() {
               <Text style={styles.typePill}>{action.payload.type}</Text>
             </View>
             <Pressable style={styles.primaryButton} onPress={() => void useAction(action).catch(()=>Alert.alert('Could not open action','The configured destination could not be opened.'))}>
-              <Text style={styles.primaryButtonText}>{action.payload.type === 'qr' ? 'Show QR' : isInputPayload(action.payload) ? 'Write' : action.payload.type==='http'?'Run request':'Open'}</Text>
+              <Text style={styles.primaryButtonText}>{action.payload.type === 'notes' ? 'Go to notes' : action.payload.type === 'qr' ? 'Show QR' : isInputPayload(action.payload) ? 'Write' : action.payload.type==='http'?'Run request':'Open'}</Text>
             </Pressable>
           </View>
         ))}
@@ -74,6 +78,7 @@ export default function PresetActionsScreen() {
 }
 
 function actionSummary(action: HandyAction): string {
+  if (action.payload.type === 'notes') return 'Open the notes inbox in this app';
   if (action.payload.type === 'text-input') return action.payload.urlTemplate;
   if (action.payload.type === 'qr') return action.payload.value;
   if (action.payload.type === 'http') return `${action.payload.method} ${action.payload.path}`;

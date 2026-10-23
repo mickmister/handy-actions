@@ -25,7 +25,9 @@ export type HttpActionPayload = {
 export type AgentSession = { id: string; workspaceId: string; label: string; executor: string };
 export type AgentActionPayload = { type: 'vd-agent'; originId: string; prefix: string; session?: AgentSession };
 
-export type HandyActionPayload = QrActionPayload | WebActionPayload | DeepLinkActionPayload | TextInputActionPayload | HttpActionPayload | AgentActionPayload;
+export type NotesActionPayload = { type: 'notes' };
+
+export type HandyActionPayload = QrActionPayload | WebActionPayload | DeepLinkActionPayload | TextInputActionPayload | HttpActionPayload | AgentActionPayload | NotesActionPayload;
 
 export function isInputPayload(payload: HandyActionPayload): boolean {
   return payload.type === 'text-input' || payload.type === 'vd-agent' || (payload.type === 'http' && payload.captureText);
@@ -69,7 +71,7 @@ export type NotificationActionRow = {
   payload: HandyActionPayload;
 };
 
-export type LiveActivityActionLink = { title: string; url: string; captureTarget?: string; siteGlyph?: string };
+export type LiveActivityActionLink = { title: string; url: string; captureTarget?: string; siteGlyph?: string; systemImage?: 'note.text' };
 
 export type HandyActionsLiveActivityProps = {
   presetId: string;
@@ -322,6 +324,7 @@ export function enabledPresets(state: HandyState): HandyPreset[] {
 
 function validatePayload(payload: unknown, path: string): string[] {
   if (!isRecord(payload)) return [`${path} must be an object.`];
+  if (payload.type === 'notes') return [];
   if (payload.type === 'text-input') {
     return validTextTemplate(payload.urlTemplate) ? [] : [`${path}.urlTemplate must be an app/https URL containing {text} in its query or path.`];
   }
@@ -355,6 +358,7 @@ function validatePayload(payload: unknown, path: string): string[] {
 
 function normalizePayload(payload: unknown): HandyActionPayload {
   if (!isRecord(payload)) return { type: 'qr', value: '' };
+  if (payload.type === 'notes') return { type: 'notes' };
   if (payload.type === 'text-input' && typeof payload.urlTemplate === 'string') {
     return {
       type: 'text-input', urlTemplate: payload.urlTemplate,

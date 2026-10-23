@@ -82,6 +82,10 @@ function RootLayoutNav() {
         router.push({ pathname: '/preset-actions', params: { presetId: target.presetId } });
         return;
       }
+      if (target.action.payload.type === 'notes') {
+        router.push('/notes');
+        return;
+      }
       if (target.action.payload.type === 'qr') {
         router.push({ pathname: '/qr', params: { title: target.action.name, value: target.action.payload.value } });
       }

@@ -35,7 +35,7 @@ const HandyActionsActivity = (props: HandyActionsLiveActivityProps, environment:
       ]}>
         {action.siteGlyph
           ? <Text modifiers={[font({ family: 'FontAwesome6Brands-Regular', size: 16 }), foregroundStyle(highlight)]}>{action.siteGlyph}</Text>
-          : <Image systemName={action.captureTarget ? 'square.and.pencil' : 'arrow.up.right'} color={highlight} size={14} />}
+          : <Image systemName={action.systemImage ?? (action.captureTarget ? 'square.and.pencil' : 'arrow.up.right')} color={highlight} size={14} />}
         <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(2), frame({ minWidth: 0, maxWidth: 10000, alignment: 'leading' })]}>{action.title}</Text>
       </HStack>;
       const modifiers = [frame({ minWidth: 0, maxWidth: 10000 })];
