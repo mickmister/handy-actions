@@ -1,4 +1,4 @@
-import { Button, HStack, Image, Link, Spacer, Text, VStack } from '@expo/ui/swift-ui';
+import { Button, HStack, Image, Link, Text, VStack } from '@expo/ui/swift-ui';
 import {
   activityBackgroundTint, background, buttonStyle, cornerRadius, font,
   foregroundStyle, frame, lineLimit, padding,
@@ -13,74 +13,52 @@ const HandyActionsActivity = (props: HandyActionsLiveActivityProps, environment:
   const subdued = !!environment.isLuminanceReduced;
   const accent = subdued ? '#CDD5DA' : props.theme?.accent ?? '#79E3CF';
   const islandAccent = !dark && !subdued ? '#A7F3D0' : accent;
-  const bannerInk = subdued ? '#F3F6F7' : props.theme?.ink ?? (dark ? '#F3F6F7' : '#172D36');
-  const secondaryInk = subdued ? '#AFBDC9' : props.theme?.muted ?? (dark ? '#9AAEB8' : '#536D79');
   const colors = props.theme?.colors ?? ['#0E1820','#15333D'];
-  const countLabel = props.actionCount === 1 ? '1 action' : `${props.actionCount} actions`;
+
+  // Older active snapshots may still use the flat list. Keep those readable
+  // with the same two-column layout until the next content refresh.
+  const rows = props.actionRows ?? (props.actionLinks ?? []).reduce<NonNullable<HandyActionsLiveActivityProps['actionRows']>>((result, action, index) => {
+    if (index % 2 === 0) result.push([]);
+    result[result.length - 1].push(action);
+    return result;
+  }, []);
 
   // Keep helpers inside the worklet: the extension serializes only this function.
   // Island uses a dark palette even when the Lock Screen has a light appearance.
-  const actionControls = (onDark: boolean) => (props.actionLinks ?? []).map((action) => {
-    const ink = onDark ? '#F3F6F7' : '#172D36';
-    const highlight = onDark ? islandAccent : '#176D61';
-    const label = <VStack spacing={7} modifiers={[
-      padding({ horizontal: 10, vertical: 10 }), frame({ minHeight: 56 }),
-      background(subdued ? '#111A20' : onDark ? (dark ? props.theme?.tile ?? '#1A2931' : '#1A2931') : props.theme?.tile ?? '#E5EDEF'), cornerRadius(14),
-    ]}>
-      <Image systemName={action.captureTarget ? 'square.and.pencil' : 'arrow.up.right'} color={highlight} size={16} />
-      <HStack spacing={0}>
-        <Spacer />
-        <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(2)]}>{action.title}</Text>
-        <Spacer />
-      </HStack>
-    </VStack>;
-    return action.captureTarget
-      ? <Button key={action.url} target={action.captureTarget} modifiers={[buttonStyle('plain')]}>{label}</Button>
-      : <Link key={action.url} destination={action.url}>{label}</Link>;
-  });
+  const actionControls = (onDark: boolean) => rows.map((row, rowIndex) => <HStack key={`row-${rowIndex}`} spacing={6}>
+    {row.map((action) => {
+      const ink = onDark ? '#F3F6F7' : '#172D36';
+      const highlight = onDark ? islandAccent : '#176D61';
+      const label = <HStack spacing={8} modifiers={[
+        padding({ horizontal: 10, vertical: 6 }), frame({ minWidth: 0, maxWidth: 10000, height: 44 }),
+        background(subdued ? '#111A20' : onDark ? (dark ? props.theme?.tile ?? '#1A2931' : '#1A2931') : props.theme?.tile ?? '#E5EDEF'), cornerRadius(14),
+      ]}>
+        <Image systemName={action.captureTarget ? 'square.and.pencil' : 'arrow.up.right'} color={highlight} size={14} />
+        <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(2), frame({ minWidth: 0, maxWidth: 10000, alignment: 'leading' })]}>{action.title}</Text>
+      </HStack>;
+      const modifiers = [frame({ minWidth: 0, maxWidth: 10000 })];
+      return action.captureTarget
+        ? <Button key={action.url} target={action.captureTarget} modifiers={[buttonStyle('plain'), ...modifiers]}>{label}</Button>
+        : <Link key={action.url} destination={action.url} modifiers={modifiers}>{label}</Link>;
+    })}
+  </HStack>);
 
   return {
     banner: (
-      <VStack alignment="leading" spacing={12} modifiers={[
-        padding({ all: 14 }), activityBackgroundTint(subdued ? '#0E1820' : colors[0]),
+      <VStack spacing={6} modifiers={[
+        padding({ all: 8 }), activityBackgroundTint(subdued ? '#0E1820' : colors[0]),
         background(subdued ? '#0E1820' : {type:'linearGradient',colors,startPoint:{x:0,y:0},endPoint:{x:1,y:1}}),
       ]}>
-        <HStack spacing={12}>
-          <VStack alignment="leading" spacing={3}>
-            <Text modifiers={[font({ size: 10, weight: 'semibold' }), foregroundStyle(secondaryInk)]}>HANDY ACTIONS</Text>
-            <Text modifiers={[font({ size: 18, weight: 'semibold' }), foregroundStyle(bannerInk), lineLimit(1)]}>{props.presetName}</Text>
-          </VStack>
-          <Spacer />
-          <Link destination={props.openUrl} modifiers={[foregroundStyle(dark ? accent : '#176D61')]}>
-            <VStack alignment="trailing" spacing={3}>
-              <Text modifiers={[font({ size: 12, weight: 'semibold' })]}>All actions ↗</Text>
-              <Text modifiers={[font({ size: 11 }), foregroundStyle(secondaryInk)]}>{countLabel}</Text>
-            </VStack>
-          </Link>
-        </HStack>
-        <HStack spacing={8}>{actionControls(subdued || dark)}</HStack>
+        {actionControls(subdued || dark)}
       </VStack>
     ),
-    bannerSmall: <VStack alignment="leading" spacing={4} modifiers={[padding({ all: 10 })]}>
-      <Text modifiers={[font({ size: 14, weight: 'semibold' }), lineLimit(1)]}>{props.presetName}</Text>
-      <Text modifiers={[font({ size: 11 })]}>{countLabel}</Text>
+    bannerSmall: <VStack spacing={6} modifiers={[padding({ all: 6 })]}>
+      {actionControls(subdued || dark)}
     </VStack>,
     compactLeading: <Image systemName="square.and.pencil" color={islandAccent} />,
-    compactTrailing: <Text modifiers={[font({ size: 13, weight: 'semibold' }), foregroundStyle(islandAccent)]}>{props.actionCount}</Text>,
     minimal: <Image systemName="square.and.pencil" color={islandAccent} />,
-    expandedLeading: (
-      <VStack alignment="leading" spacing={3} modifiers={[padding({ leading: 6, top: 4 })]}>
-        <Text modifiers={[font({ size: 10, weight: 'semibold' }), foregroundStyle('#9AAEB8')]}>HANDY ACTIONS</Text>
-        <Text modifiers={[font({ size: 15, weight: 'semibold' }), foregroundStyle('#F3F6F7'), lineLimit(1)]}>{props.presetName}</Text>
-      </VStack>
-    ),
-    expandedTrailing: (
-      <VStack modifiers={[padding({ trailing: 6, top: 4 })]}>
-        <Link destination={props.openUrl} label="All actions ↗" modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(islandAccent)]} />
-      </VStack>
-    ),
     expandedBottom: (
-      <HStack spacing={8} modifiers={[padding({ horizontal: 4, top: 8, bottom: 4 }),background(subdued?'#0E1820':{type:'linearGradient',colors:dark?colors:['#0E1820','#15333D'],startPoint:{x:0,y:0},endPoint:{x:1,y:1}}),cornerRadius(14)]}>{actionControls(true)}</HStack>
+      <VStack spacing={6} modifiers={[padding({ all: 6 }),background(subdued?'#0E1820':{type:'linearGradient',colors:dark?colors:['#0E1820','#15333D'],startPoint:{x:0,y:0},endPoint:{x:1,y:1}}),cornerRadius(14)]}>{actionControls(true)}</VStack>
     ),
   };
 };

@@ -11,6 +11,7 @@ import {
   findAction,
   importHandyState,
   liveActivityPropsForPreset,
+  liveActivityActionRowsForPreset,
   liveActivityCaptureTarget,
   notificationBodyForPreset,
   notificationIdForPreset,
@@ -70,6 +71,34 @@ test('live activity props summarize the preset without app runtime state', () =>
     updatedAt: '2026-10-02T20:00:00.000Z',
     openUrl: 'handyactions://preset-actions?presetId=conference',
   });
+});
+
+test('Live Activity rows retain every action in order, including capture destinations beyond the third action', () => {
+  const preset: HandyPreset = {
+    id: 'many-actions', name: 'Many actions', enabled: true,
+    actions: Array.from({length:7}, (_, index) => ({
+      id: `action-${index}`, name: 'Same label',
+      payload: {type:'text-input',urlTemplate:`app://note-${index}?text={text}`},
+    })),
+  };
+  for (const count of [0,1,2,3,4,5,6,7]) {
+    const subset = {...preset,actions:preset.actions.slice(0,count)};
+    const rows = liveActivityActionRowsForPreset(subset, action => ({
+      title:action.name,
+      url:`app://capture?presetId=${preset.id}&actionId=${action.id}`,
+      captureTarget:liveActivityCaptureTarget(preset.id,action),
+    }));
+    assert.equal(rows.length,Math.ceil(count/2));
+    assert.equal(rows.every(row=>row.length>0&&row.length<=2),true);
+    assert.deepEqual(rows.flat().map(link=>new URL(link.url).searchParams.get('actionId')),subset.actions.map(action=>action.id));
+    for (const [index,link] of rows.flat().entries()) {
+      const snapshot=JSON.parse(link.captureTarget!.slice('handy-note-capture-v1:'.length));
+      assert.equal(snapshot.presetId,preset.id);
+      assert.deepEqual(actionFromNotificationRowsData(snapshot.actionId,snapshot.actions),subset.actions[index]);
+    }
+    // Live Activity layout must not inherit notification quick-action limits.
+    assert.equal(actionNotificationRows(subset).length,Math.min(count,3));
+  }
 });
 
 test('validates typed action payloads', () => {

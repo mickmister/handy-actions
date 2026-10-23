@@ -69,6 +69,8 @@ export type NotificationActionRow = {
   payload: HandyActionPayload;
 };
 
+export type LiveActivityActionLink = { title: string; url: string; captureTarget?: string };
+
 export type HandyActionsLiveActivityProps = {
   presetId: string;
   presetName: string;
@@ -78,7 +80,8 @@ export type HandyActionsLiveActivityProps = {
   thirdAction: string;
   updatedAt: string;
   openUrl: string;
-  actionLinks?: { title: string; url: string; captureTarget?: string }[];
+  actionLinks?: LiveActivityActionLink[];
+  actionRows?: LiveActivityActionLink[][];
   theme?: { id: string; colors: string[]; accent: string; ink: string; muted: string; tile: string };
 };
 
@@ -274,6 +277,18 @@ export function liveActivityPropsForPreset(
     updatedAt,
     openUrl,
   };
+}
+
+export function liveActivityActionRowsForPreset(
+  preset: HandyPreset,
+  linkForAction: (action: HandyAction) => LiveActivityActionLink,
+): LiveActivityActionLink[][] {
+  const rows: LiveActivityActionLink[][] = [];
+  for (const action of preset.actions) {
+    if (!rows.length || rows[rows.length - 1].length === 2) rows.push([]);
+    rows[rows.length - 1].push(linkForAction(action));
+  }
+  return rows;
 }
 
 export function actionFromNotificationRowsData(actionId: string, rawActions: unknown): HandyAction | undefined {

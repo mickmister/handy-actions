@@ -81,7 +81,7 @@ export default function SettingsScreen() {
               <Text style={styles.secondaryButtonText}>{preset.name}</Text>
             </Pressable>)}
           </View>
-          <Text style={styles.copy}>On iOS 17+, circular and rectangular input buttons post native capture notifications; inline widgets and older iOS use app-opening links. Rectangular shows two actions; Live Activities show three plus All actions. iOS controls refresh timing and placement.</Text>
+          <Text style={styles.copy}>On iOS 17+, circular and rectangular input buttons post native capture notifications; inline widgets and older iOS use app-opening links. Rectangular widgets show two actions; Live Activities arrange all actions in rows of up to two. iOS controls available space, refresh timing and placement.</Text>
         </> : null}
         <Text style={styles.copy}>{handy.message}</Text>
       </View>

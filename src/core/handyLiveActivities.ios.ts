@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   enabledPresets,
   liveActivityPropsForPreset,
+  liveActivityActionRowsForPreset,
   surfaceSettings,
   type HandyActionsLiveActivityProps,
   type HandyState,
@@ -26,7 +27,7 @@ export async function syncPresetLiveActivities(state: HandyState, renew = false)
     const openUrl = ExpoLinking.createURL('/preset-actions', { queryParams: { presetId: preset.id } });
     const props = liveActivityPropsForPreset(preset, new Date().toISOString(), openUrl);
     props.theme = activityTheme(state.theme,props.updatedAt);
-    props.actionLinks = preset.actions.slice(0, 3).map((action) => ({
+    props.actionRows = liveActivityActionRowsForPreset(preset, (action) => ({
       title: action.name,
       url: ExpoLinking.createURL('/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: isInputPayload(action.payload) ? '1' : '0' } }),
       captureTarget: nativeCaptureTarget(preset.id, action),
