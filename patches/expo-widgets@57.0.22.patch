@@ -1,6 +1,6 @@
 diff --git a/ios/HandyBackgroundDelivery.swift b/ios/HandyBackgroundDelivery.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..adc9f917906606930bb0a1a98d80bd952229c0b2
+index 0000000000000000000000000000000000000000..4df9238887be31656c9a6df22d2be97cf6b60110
 --- /dev/null
 +++ b/ios/HandyBackgroundDelivery.swift
 @@ -0,0 +1,252 @@
@@ -111,7 +111,7 @@ index 0000000000000000000000000000000000000000..adc9f917906606930bb0a1a98d80bd95
 +      var success = false
 +      var message = "Delivery could not be confirmed. Review the destination before retrying in the editor."
 +      if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-+        message = "Choose Open editor to continue. No empty request was sent."
++        message = "Tap this notification to continue in the editor. No empty request was sent."
 +      } else {
 +        do { message = try await HandyBackgroundDelivery().deliver(payload, text); success = true }
 +        catch Failure.retained(let safeMessage) { message = safeMessage }
@@ -302,7 +302,7 @@ index 0000000000000000000000000000000000000000..b672a0c4cf60367976f03e0ca7bcde44
 +  }
 +}
 diff --git a/ios/Widgets/AppIntent.swift b/ios/Widgets/AppIntent.swift
-index 972fa4f190d5da8f961218bcbe2436964ac34acf..d6e42397e61ecdd7607cb8756632c5545bbc283e 100644
+index 972fa4f190d5da8f961218bcbe2436964ac34acf..413b4330d20bdf0f512900d7051599209cbe32cf 100644
 --- a/ios/Widgets/AppIntent.swift
 +++ b/ios/Widgets/AppIntent.swift
 @@ -1,5 +1,6 @@
@@ -332,7 +332,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..d6e42397e61ecdd7607cb8756632c554
      WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
        "source": source as Any,
        "target": target as Any,
-@@ -128,3 +135,104 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+@@ -128,3 +135,103 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
      return .result()
    }
  }
@@ -390,27 +390,26 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..d6e42397e61ecdd7607cb8756632c554
 +      identifier: "handy-input-submit", title: "Add Note", options: localSave || backgroundRequest ? [] : [.foreground],
 +      textInputButtonTitle: localSave ? "Save" : "Send", textInputPlaceholder: "Write a note…"
 +    )
-+    let editor = UNNotificationAction(identifier: "handy-open-editor", title: "Open editor", options: [.foreground])
 +    let category = UNNotificationCategory(
-+      identifier: selectedCategory, actions: [reply, editor], intentIdentifiers: [], options: []
++      identifier: selectedCategory, actions: [reply], intentIdentifiers: [], options: []
 +    )
 +    var categories = await center.notificationCategories()
 +    categories = Set(categories.filter { $0.identifier != selectedCategory })
 +    categories.insert(category)
 +    categories = Set(categories.filter { $0.identifier != "handy-action-editor-v1" })
-+    categories.insert(UNNotificationCategory(identifier: "handy-action-editor-v1", actions: [editor], intentIdentifiers: [], options: []))
++    categories.insert(UNNotificationCategory(identifier: "handy-action-editor-v1", actions: [], intentIdentifiers: [], options: []))
 +    if localSave {
 +      let retry = UNNotificationAction(identifier: "handy-local-retry", title: "Retry save", options: [])
 +      categories = Set(categories.filter { $0.identifier != "handy-text-input-local-recovery-v1" })
 +      categories.insert(UNNotificationCategory(
-+        identifier: "handy-text-input-local-recovery-v1", actions: [retry, reply, editor], intentIdentifiers: [], options: []
++        identifier: "handy-text-input-local-recovery-v1", actions: [retry, reply], intentIdentifiers: [], options: []
 +      ))
 +    }
 +    center.setNotificationCategories(categories)
 +
 +    let submissionID = UUID().uuidString
 +    let notificationID = "handy-input-\(submissionID)"
-+    let body = "Expand this notification and select Add Note to type."
++    let body = "Expand and select Add Note to type, or tap this notification to open the editor."
 +    var data: [String: String] = [
 +      "captureActionId": capture.actionId, "presetId": capture.presetId,
 +      "submissionId": submissionID, "actions": capture.actions

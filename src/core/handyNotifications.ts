@@ -39,6 +39,7 @@ import { request } from './requests';
 import { httpRequestSpec } from './httpActions';
 import { nativeActionInbox } from './nativeActionInbox';
 import { isRefreshPress, REFRESH_NOTIFICATION_ID, REFRESH_PRESS_ID } from './lockScreenRefresh';
+import { notificationEditorContext } from './notificationEditorContext';
 
 const CHANNEL_ID = 'handy-actions';
 const INPUT_CATEGORY = 'handy-text-input';
@@ -121,18 +122,17 @@ async function configureCategories(state: HandyState): Promise<void> {
   if (Platform.OS !== 'ios') return;
   await notifee.setNotificationCategories([
     {id:'handy-refresh-lock-screen-v1',actions:[{id:REFRESH_PRESS_ID,title:'Refresh Lock Screen',foreground:true}]},
-    {id:'handy-action-editor-v1',actions:[{id:'handy-open-editor',title:'Open editor',foreground:true}]},
-    ...(nativeActionInbox?[{id:'handy-text-input-background-v1',actions:[{id:INPUT_PRESS,title:'Send',foreground:false,input:{placeholderText:'Write text…',buttonText:'Send'}},{id:'handy-open-editor',title:'Open editor',foreground:true}]}]:[]),
+    {id:'handy-action-editor-v1',actions:[]},
+    ...(nativeActionInbox?[{id:'handy-text-input-background-v1',actions:[{id:INPUT_PRESS,title:'Add Note',foreground:false,input:{placeholderText:'Write text…',buttonText:'Send'}}]}]:[]),
     { id: INPUT_CATEGORY, actions: [{ id: INPUT_PRESS, title: 'Add Note', foreground: true,
-      input: { placeholderText: 'Write a note…', buttonText: 'Send' } }, {id:'handy-open-editor',title:'Open editor',foreground:true}] },
+      input: { placeholderText: 'Write a note…', buttonText: 'Send' } }] },
     ...(nativeNoteInbox ? [
       { id: LOCAL_INPUT_CATEGORY, actions: [{ id: INPUT_PRESS, title: 'Add Note', foreground: false,
-        input: { placeholderText: 'Write a note…', buttonText: 'Save' } }, {id:'handy-open-editor',title:'Open editor',foreground:true}] },
+        input: { placeholderText: 'Write a note…', buttonText: 'Save' } }] },
       { id: LOCAL_RECOVERY_CATEGORY, actions: [
         { id: LOCAL_RETRY_PRESS, title: 'Retry save', foreground: false },
-        { id: INPUT_PRESS, title: 'Edit note', foreground: false,
+        { id: INPUT_PRESS, title: 'Add Note', foreground: false,
           input: { placeholderText: 'Write a replacement note…', buttonText: 'Save' } },
-        {id:'handy-open-editor',title:'Open editor',foreground:true},
       ] },
     ] : []),
     ...enabledPresets(state).map((preset) => ({
@@ -288,10 +288,11 @@ async function openPressAction(pressId: unknown, data: unknown, input?: string, 
     }
   }
   if (captureActionId) {
-    const action = actionFromNotificationData(captureActionId, data) ?? findAction(await loadHandyState(), captureActionId, sourcePresetId)?.action;
+    const editor = notificationEditorContext(data);
+    const action = editor?.action ?? findAction(await loadHandyState(), captureActionId, sourcePresetId)?.action;
     if (action) {
-      const text=dataString(data,'editorText') ?? dataString(data,'localNoteRecoveryText') ?? '';
-      const recoveryId=dataString(data,'recoverySubmissionId');
+      const text=editor?.text ?? dataString(data,'editorText') ?? dataString(data,'localNoteRecoveryText') ?? '';
+      const recoveryId=editor?.submissionId ?? dataString(data,'recoverySubmissionId');
       if(recoveryId && text.trim()) {
         const pending=await queueNote(action,text,recoveryId,sourcePresetId);
         if(pending){await markNoteAttempt(pending.id);deliverPressTarget({type:'input',submissionId:pending.id});}
@@ -359,15 +360,14 @@ export async function showTextInputNotification(action: HandyAction, presetId?: 
   const nativeRequest = sendsInNative(action);
   await notifee.displayNotification({
     id: `handy-input-${submissionId}`, title: action.name,
-    body: 'Expand this notification and select Add Note to type. You can also write in the app.',
+    body: 'Expand and select Add Note to type, or tap this notification to open the editor.',
     data: { captureActionId: action.id, submissionId, ...(presetId ? { presetId } : {}),
       ...(nativeLocal ? { localNoteDestination: '1' } : {}),
       ...(nativeRequest ? {backgroundRequest:'1'} : {}),
       actions: JSON.stringify([{ id: action.id, title: action.name, payload: action.payload }]) },
     ios: { categoryId: nativeLocal ? LOCAL_INPUT_CATEGORY : nativeRequest ? 'handy-text-input-background-v1' : INPUT_CATEGORY, foregroundPresentationOptions: { banner: true, list: true, sound: false } },
     android: { channelId: CHANNEL_ID, pressAction: { id: 'capture', launchActivity: 'default' },
-      actions: [{ title: 'Add Note', pressAction: { id: INPUT_PRESS, launchActivity: 'default' }, input: { placeholder: 'Write a note…' } },
-        {title:'Open editor',pressAction:{id:'handy-open-editor',launchActivity:'default'}}] },
+      actions: [{ title: 'Add Note', pressAction: { id: INPUT_PRESS, launchActivity: 'default' }, input: { placeholder: 'Write a note…' } }] },
   });
 }
 

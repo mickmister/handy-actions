@@ -1,5 +1,5 @@
 diff --git a/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m b/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m
-index beaa3600a9fc9edb0fed561c18f82fa57c8ea3ac..ae71eddb1087c16adf50d400e2886c0ee7be52d9 100644
+index beaa3600a9fc9edb0fed561c18f82fa57c8ea3ac..1ddf3d27d3d8a744001847c1af261d7e1e5d051f 100644
 --- a/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m
 +++ b/ios/NotifeeCore/NotifeeCore+UNUserNotificationCenter.m
 @@ -19,6 +19,166 @@
@@ -60,7 +60,7 @@ index beaa3600a9fc9edb0fed561c18f82fa57c8ea3ac..ae71eddb1087c16adf50d400e2886c0e
 +    updated[@"ios"] = @{@"categoryId": @"handy-action-editor-v1"};
 +    UNMutableNotificationContent *editor = [[UNMutableNotificationContent alloc] init];
 +    editor.title = @"Continue in Handy Actions";
-+    editor.body = @"Choose Open editor to write your note. Nothing was saved.";
++    editor.body = @"Tap this notification to write your note in the editor. Nothing was saved.";
 +    editor.categoryIdentifier = @"handy-action-editor-v1";
 +    editor.userInfo = @{kNotifeeUserInfoNotification: updated};
 +    [center addNotificationRequest:[UNNotificationRequest requestWithIdentifier:response.notification.request.identifier content:editor trigger:nil]
