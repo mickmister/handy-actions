@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { runActionPayload } from '@/src/core/handyNotifications';
+import { runActionPayload, syncPresetNotifications } from '@/src/core/handyNotifications';
 import type { HandyActionPayload } from '@/src/core/handyModel';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 import { Link } from 'expo-router';
@@ -24,6 +24,24 @@ export default function ActionsScreen() {
   const [value, setValue] = useState('');
   const [remote, setRemote] = useState<HandyActionPayload>({type:'http',originId:'',path:'/',method:'POST',bodyFormat:'json',body:'{"text":"{text}"}',captureText:true});
   const [editingId, setEditingId] = useState<string>();
+  const [reordering, setReordering] = useState(false);
+  const reorderInFlight = useRef(false);
+
+  async function moveAction(actionId: string, direction: -1 | 1) {
+    if (!selectedPreset || reorderInFlight.current) return;
+    reorderInFlight.current = true;
+    setReordering(true);
+    try {
+      const result = await handy.moveAction(selectedPreset.id, actionId, direction);
+      if (!result.ok) { Alert.alert('Could not reorder action', result.message); return; }
+      handy.setMessage(await syncPresetNotifications(result.state));
+    } catch {
+      Alert.alert('Could not finish reordering', 'Check the action order, then refresh the Lock Screen to apply it.');
+    } finally {
+      reorderInFlight.current = false;
+      setReordering(false);
+    }
+  }
 
   async function addAction() {
     if (!selectedPreset) return;
@@ -61,6 +79,7 @@ export default function ActionsScreen() {
               {handy.state.presets.map((preset) => (
                 <Pressable
                   key={preset.id}
+                  disabled={reordering}
                   style={preset.id === selectedPreset?.id ? styles.selectedChip : styles.chip}
                   onPress={() => { setSelectedPresetId(preset.id); setEditingId(undefined); setName(''); setValue(''); }}>
                   <Text style={preset.id === selectedPreset?.id ? styles.selectedChipText : styles.chipText}>{preset.name}</Text>
@@ -108,7 +127,7 @@ export default function ActionsScreen() {
               </Pressable>
             </> : null}
             {(type==='http'||type==='vd-agent')&&(remote.type==='http'||remote.type==='vd-agent')?<RemoteActionEditor value={remote} onChange={setRemote} />:null}
-            <Pressable style={styles.primaryButton} onPress={()=>void addAction().catch(()=>Alert.alert('Action','Could not save this action.'))}>
+            <Pressable disabled={reordering} style={styles.primaryButton} onPress={()=>void addAction().catch(()=>Alert.alert('Action','Could not save this action.'))}>
               <Text style={styles.primaryButtonText}>{editingId ? 'Save action' : 'Add action'}</Text>
             </Pressable>
             {editingId ? <Pressable onPress={() => { setEditingId(undefined); setName(''); setValue(''); }}>
@@ -116,7 +135,8 @@ export default function ActionsScreen() {
             </Pressable> : null}
           </View>
 
-          {selectedPreset?.actions.map((action) => (
+          {selectedPreset?.actions.length ? <Text style={styles.copy}>Use Move up and Move down to reorder actions. The order is saved automatically and applied to Lock Screen surfaces.</Text> : null}
+          {selectedPreset?.actions.map((action, index) => (
             <View key={action.id} style={styles.card}>
               <View style={styles.row}>
                 <ActionIcon payload={action.payload} />
@@ -124,6 +144,19 @@ export default function ActionsScreen() {
                   <Text style={styles.cardTitle}>{action.name}</Text>
                   <Text style={styles.meta}>{JSON.stringify(action.payload)}</Text>
                 </View>
+              </View>
+              <View style={styles.orderRow}>
+                <Text style={styles.copy}>Position {index + 1} of {selectedPreset.actions.length}</Text>
+                {([-1, 1] as const).map(direction => {
+                  const unavailable = reordering || (direction === -1 ? index === 0 : index === selectedPreset.actions.length - 1);
+                  const label = direction === -1 ? 'Move up' : 'Move down';
+                  return <Pressable key={direction} accessibilityRole="button" accessibilityLabel={`${label}: ${action.name}`}
+                    accessibilityState={{ disabled: unavailable }} disabled={unavailable}
+                    style={[styles.orderButton, unavailable && styles.disabledButton]}
+                    onPress={() => void moveAction(action.id, direction)}>
+                    <Text style={styles.chipText}>{label}</Text>
+                  </Pressable>;
+                })}
               </View>
               <View style={styles.row}>
                 {action.payload.type === 'notes' ? (
@@ -152,12 +185,13 @@ export default function ActionsScreen() {
                   if(action.payload.type==='http'||action.payload.type==='vd-agent')setRemote(action.payload);
                   else setValue(action.payload.type === 'notes' ? '' : action.payload.type === 'qr' ? action.payload.value : action.payload.type === 'text-input' ? action.payload.urlTemplate : action.payload.url);
                 }}><Text style={styles.chipText}>Edit</Text></Pressable>
-                <Pressable onPress={() => selectedPreset && void handy.deleteAction(selectedPreset.id, action.id)}>
+                <Pressable disabled={reordering} onPress={() => selectedPreset && void handy.deleteAction(selectedPreset.id, action.id)}>
                   <Text style={styles.deleteText}>Delete</Text>
                 </Pressable>
               </View>
             </View>
           ))}
+          {reordering ? <Text accessibilityLiveRegion="polite" style={styles.copy}>Saving order and refreshing Lock Screen surfaces…</Text> : null}
         </>
       )}
     </ScrollView>
@@ -186,6 +220,9 @@ const styles = StyleSheet.create({
   cardTitle: { color: '#111827', fontSize: 18, fontWeight: '800' },
   meta: { color: '#6b7280', fontFamily: 'SpaceMono', fontSize: 12, lineHeight: 18, marginTop: 6 },
   row: { alignItems: 'center', flexDirection: 'row', gap: 12, justifyContent: 'space-between' },
+  orderRow: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  orderButton: { backgroundColor: '#f1f5f9', borderRadius: 12, minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
+  disabledButton: { opacity: 0.4 },
   flex: { flex: 1 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { backgroundColor: '#f1f5f9', borderRadius: 999, minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },

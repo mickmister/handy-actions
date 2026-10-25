@@ -11,6 +11,7 @@ import {
   type SurfaceSettings,
 } from '@/src/core/handyModel';
 import { loadHandyState, saveHandyState } from '@/src/core/handyStore';
+import { movePresetAction } from '@/src/core/actionOrdering';
 
 export type SaveResult = { ok: true; message: string } | { ok: false; message: string };
 
@@ -134,7 +135,13 @@ export function useHandyState() {
   const updateAction = (presetId: string, actionId: string, name: string, payload: HandyActionPayload) =>
     persist({ ...state, presets: state.presets.map((preset) => preset.id === presetId
       ? { ...preset, actions: preset.actions.map((action) => action.id === actionId ? { ...action, name: name.trim() || 'Untitled action', payload } : action) }
-      : preset) }, 'Action updated.');
+       : preset) }, 'Action updated.');
+
+  const moveAction = async (presetId: string, actionId: string, direction: -1 | 1) => {
+    const next = movePresetAction(state, presetId, actionId, direction);
+    const result = await persist(next, 'Action order saved.');
+    return result.ok ? { ...result, state: next } : result;
+  };
 
   return {
     state,
@@ -152,5 +159,6 @@ export function useHandyState() {
     updateTheme,
     updateRecentWorkspaces,
     updateAction,
+    moveAction,
   };
 }
