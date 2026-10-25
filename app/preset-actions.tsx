@@ -1,7 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { runActionPayload, syncPresetNotifications } from '@/src/core/handyNotifications';
+import { runActionPayload } from '@/src/core/handyNotifications';
 import { isInputPayload, type HandyAction } from '@/src/core/handyModel';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 import { ActionIcon } from '@/components/ActionIcon';
@@ -23,9 +23,6 @@ export default function PresetActionsScreen() {
       router.push({ pathname: '/capture', params: { actionId: action.id, presetId } });
       return;
     }
-    const message = await syncPresetNotifications(handy.state);
-    handy.setMessage(message);
-
     if (action.payload.type === 'qr') {
       router.push({ pathname: '/qr', params: { title: action.name, value: action.payload.value } });
       return;
@@ -45,7 +42,7 @@ export default function PresetActionsScreen() {
             {!handy.loaded
               ? 'Loading local presets from this device.'
               : preset
-                ? 'Tap an action. The lock-screen notification is rebuilt before the action opens.'
+                ? 'Tap an action. Saved changes automatically refresh the Lock Screen.'
                 : 'This preset is no longer in local storage.'}
           </Text>
         </View>
@@ -53,7 +50,7 @@ export default function PresetActionsScreen() {
         {preset && preset.actions.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.cardTitle}>No actions</Text>
-            <Text style={styles.copy}>Add actions on the Actions tab, then refresh notifications.</Text>
+            <Text style={styles.copy}>Add actions on the Actions tab. Saved changes automatically refresh the Lock Screen.</Text>
           </View>
         ) : null}
 

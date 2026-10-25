@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { runActionPayload, syncPresetNotifications } from '@/src/core/handyNotifications';
+import { runActionPayload } from '@/src/core/handyNotifications';
 import type { HandyActionPayload } from '@/src/core/handyModel';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 import { Link } from 'expo-router';
@@ -34,9 +34,8 @@ export default function ActionsScreen() {
     try {
       const result = await handy.moveAction(selectedPreset.id, actionId, direction);
       if (!result.ok) { Alert.alert('Could not reorder action', result.message); return; }
-      handy.setMessage(await syncPresetNotifications(result.state));
     } catch {
-      Alert.alert('Could not finish reordering', 'Check the action order, then refresh the Lock Screen to apply it.');
+      Alert.alert('Could not reorder action', 'The action order could not be saved. Please try again.');
     } finally {
       reorderInFlight.current = false;
       setReordering(false);
@@ -191,7 +190,7 @@ export default function ActionsScreen() {
               </View>
             </View>
           ))}
-          {reordering ? <Text accessibilityLiveRegion="polite" style={styles.copy}>Saving order and refreshing Lock Screen surfaces…</Text> : null}
+          {reordering ? <Text accessibilityLiveRegion="polite" style={styles.copy}>Saving action order…</Text> : null}
         </>
       )}
     </ScrollView>

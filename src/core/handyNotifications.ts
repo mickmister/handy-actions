@@ -113,8 +113,8 @@ export async function configureNotificationSurface(): Promise<void> {
   }
 }
 
-export function syncPresetNotifications(state: HandyState, options: { renewActivities?: boolean } = {}): Promise<string> {
-  const sync = syncQueue.then(() => syncSurfaces(state, options.renewActivities === true));
+export function syncPresetNotifications(state: HandyState, options: { renewActivities?: boolean; requestPermissions?: boolean } = {}): Promise<string> {
+  const sync = syncQueue.then(() => syncSurfaces(state, options.renewActivities === true, options.requestPermissions !== false));
   syncQueue = sync.catch(() => {});
   return sync;
 }
@@ -146,7 +146,7 @@ async function configureCategories(state: HandyState): Promise<void> {
   ]);
 }
 
-async function syncSurfaces(state: HandyState, renew: boolean): Promise<string> {
+async function syncSurfaces(state: HandyState, renew: boolean, requestPermissions: boolean): Promise<string> {
   currentState = state;
   const settings = surfaceSettings(state);
   const messages: string[] = [];
@@ -164,7 +164,7 @@ async function syncSurfaces(state: HandyState, renew: boolean): Promise<string> 
   } catch (error) { messages.push(`Widget: ${errorMessage(error)}`); }
 
   try {
-  if (settings.notifications) await requestNotificationAccess();
+  if (settings.notifications && requestPermissions) await requestNotificationAccess();
   // Never cancel a note-capture notification while rebuilding preset panels.
   for (const displayed of await notifee.getDisplayedNotifications()) {
     const id = displayed.notification.id;

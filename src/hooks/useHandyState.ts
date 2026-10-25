@@ -18,6 +18,7 @@ export type SaveResult = { ok: true; message: string } | { ok: false; message: s
 export function useHandyState() {
   const [state, setState] = useState<HandyState>(defaultHandyState);
   const [loaded, setLoaded] = useState(false);
+  const [refreshReady, setRefreshReady] = useState(false);
   const [message, setMessage] = useState('Loading local presets…');
 
   useEffect(() => {
@@ -26,6 +27,7 @@ export function useHandyState() {
       .then((loadedState) => {
         if (cancelled) return;
         setState(loadedState);
+        setRefreshReady(true);
         setMessage('Loaded local presets.');
       })
       .catch((error) => {
@@ -47,6 +49,7 @@ export function useHandyState() {
 
     await saveHandyState(next);
     setState(next);
+    setRefreshReady(true);
     setMessage(okMessage);
     return { ok: true, message: okMessage };
   }, []);
@@ -139,13 +142,13 @@ export function useHandyState() {
 
   const moveAction = async (presetId: string, actionId: string, direction: -1 | 1) => {
     const next = movePresetAction(state, presetId, actionId, direction);
-    const result = await persist(next, 'Action order saved.');
-    return result.ok ? { ...result, state: next } : result;
+    return persist(next, 'Action order saved.');
   };
 
   return {
     state,
     loaded,
+    refreshReady,
     message,
     setMessage,
     addPreset,

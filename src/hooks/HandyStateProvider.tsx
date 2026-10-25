@@ -1,7 +1,7 @@
 import { createContext, useContext, type PropsWithChildren } from 'react';
 
 import { useHandyState } from './useHandyState';
-import { useRecentWorkspacesRefresh } from './useRecentWorkspacesRefresh';
+import { useAutomaticLockScreenRefresh } from './useAutomaticLockScreenRefresh';
 
 type HandyStateContextValue = ReturnType<typeof useHandyState>;
 
@@ -9,7 +9,9 @@ const HandyStateContext = createContext<HandyStateContextValue | undefined>(unde
 
 export function HandyStateProvider({ children }: PropsWithChildren) {
   const value = useHandyState();
-  useRecentWorkspacesRefresh(value.state, value.loaded, value.setMessage);
+  // A failed storage read must not publish the empty fallback over existing
+  // Lock Screen content. Refresh only after a successful read or save.
+  useAutomaticLockScreenRefresh(value.state, value.refreshReady, value.setMessage);
   return <HandyStateContext.Provider value={value}>{children}</HandyStateContext.Provider>;
 }
 

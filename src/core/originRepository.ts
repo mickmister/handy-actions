@@ -47,7 +47,7 @@ function resolveDraft(draft: OriginDraft, previous?: OriginProfile): OriginProfi
   return { id: draft.id, name: draft.name.trim(), origin: normalizedOrigin(draft.origin.trim()), headers };
 }
 
-export function createOriginRepository(vault: Vault) {
+export function createOriginRepository(vault: Vault, onChange?: (id: string) => void) {
   let writes: Promise<unknown> = Promise.resolve();
   const serialize = <T>(work: () => Promise<T>) => { const next = writes.then(work); writes = next.catch(() => {}); return next; };
   const ids = async (): Promise<string[]> => JSON.parse(await vault.getItem(INDEX) ?? '[]');
@@ -73,7 +73,8 @@ export function createOriginRepository(vault: Vault) {
       const profile = resolveDraft(draft, previous);
       await vault.setItem(originKey(profile.id), JSON.stringify(profile));
       if (!existingIds.includes(profile.id)) await vault.setItem(INDEX, JSON.stringify([...existingIds, profile.id]));
+      onChange?.(profile.id);
     }); },
-    remove(id: string) { return serialize(async () => { await vault.setItem(INDEX, JSON.stringify((await ids()).filter(x => x !== id))); await vault.removeItem(originKey(id)); }); },
+    remove(id: string) { return serialize(async () => { await vault.setItem(INDEX, JSON.stringify((await ids()).filter(x => x !== id))); await vault.removeItem(originKey(id)); onChange?.(id); }); },
   };
 }

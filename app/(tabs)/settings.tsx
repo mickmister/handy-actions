@@ -36,7 +36,6 @@ export default function SettingsScreen() {
       const next = { ...recentWorkspaces, ...patch };
       const result = await handy.updateRecentWorkspaces(next);
       if (!result.ok) throw new Error(result.message);
-      handy.setMessage(await syncPresetNotifications({ ...handy.state, recentWorkspaces: next }));
     } catch { Alert.alert('Recent VD workspaces', 'Could not apply the workspace list settings.'); }
     finally { setSyncing(false); }
   }
@@ -45,8 +44,8 @@ export default function SettingsScreen() {
     setSyncing(true);
     try {
       const next = { ...surfaces, ...patch };
-      await handy.updateSurfaces(next);
-      handy.setMessage(await syncPresetNotifications({ ...handy.state, surfaces: next }));
+      const result = await handy.updateSurfaces(next);
+      if (!result.ok) throw new Error(result.message);
     } catch (error) { Alert.alert('Could not update lock screen', String(error)); }
     finally { setSyncing(false); }
   }
@@ -137,7 +136,7 @@ export default function SettingsScreen() {
         <Link href="/origins">Manage origins / test VD connection</Link>
         <Text style={styles.copy}>Tap a workspace name to open its origin’s /workspaces/:workspaceId page in your browser. Browser authentication is separate from the app’s saved API headers.</Text>
         <Text style={styles.copy}>Refreshes when the app opens or returns to the foreground, and when you refresh Lock Screen surfaces. Live Activities must also be enabled above.</Text>
-        <Pressable style={styles.darkButton} disabled={!handy.loaded || syncing || Platform.OS !== 'ios'} onPress={() => void updateRecentWorkspaces({})}>
+        <Pressable style={styles.darkButton} disabled={!handy.loaded || syncing || Platform.OS !== 'ios'} onPress={() => void refreshNotifications()}>
           <Text style={styles.darkButtonText}>{syncing ? 'Applying…' : 'Refresh recent workspaces'}</Text>
         </Pressable>
         <Text accessibilityLiveRegion="polite" style={styles.copy}>{handy.message}</Text>
@@ -147,7 +146,7 @@ export default function SettingsScreen() {
         <Text style={styles.cardTitle}>Live Activity theme</Text>
         {themeOptions.map(theme=><Pressable key={theme.id} disabled={!handy.loaded||syncing} style={[styles.card,{backgroundColor:theme.colors[0],borderColor:(handy.state.theme??'psychedelic')===theme.id?'#38BDF8':'transparent',borderWidth:3}]} onPress={()=>{
           setSyncing(true);
-          void handy.updateTheme(theme.id).then(async result=>{if(!result.ok)throw new Error(result.message);handy.setMessage(await syncPresetNotifications({...handy.state,theme:theme.id}));}).catch(()=>Alert.alert('Theme','Could not apply the theme.')).finally(()=>setSyncing(false));
+          void handy.updateTheme(theme.id).then(result=>{if(!result.ok)throw new Error(result.message);}).catch(()=>Alert.alert('Theme','Could not apply the theme.')).finally(()=>setSyncing(false));
         }}><Text style={{color:theme.id==='paper'?'#172D36':'#F8FAFC',fontWeight:'800'}}>{theme.name}{(handy.state.theme??'psychedelic')===theme.id?' ✓':''}</Text>
           <View style={styles.buttonRow}>{theme.colors.map(color=><View key={color} style={{backgroundColor:color,width:36,height:20,borderRadius:6,borderWidth:1,borderColor:'#94A3B8'}} />)}</View>
           <Text style={{color:theme.id==='paper'?'#475569':'#D3DFEB'}}>{theme.description}</Text>
