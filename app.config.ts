@@ -54,6 +54,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       'expo-router',
       'expo-secure-store',
       './plugins/withAndroidBuildCompatibility',
+      './plugins/withHttpOrigins',
       // Xcode mods run in reverse registration order; add the font after the
       // expo-widgets mod has created its extension target.
       './plugins/withWidgetIconFont',
