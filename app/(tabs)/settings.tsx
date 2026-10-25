@@ -84,6 +84,12 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.card}>
+        <Text style={styles.cardTitle}>About</Text>
+        <Text selectable style={styles.copy}>Commit: {process.env.EXPO_PUBLIC_COMMIT_HASH || 'Unknown'}</Text>
+        <Text selectable style={styles.copy}>{process.env.EXPO_PUBLIC_COMMIT_MESSAGE || 'Commit message unavailable'}</Text>
+      </View>
+
+      <View style={styles.card}>
         <Text style={styles.cardTitle}>Lock-screen experiments</Text>
         <Text style={styles.copy}>Enable either surface, or both to compare them. Changes are saved and applied immediately.</Text>
         {([

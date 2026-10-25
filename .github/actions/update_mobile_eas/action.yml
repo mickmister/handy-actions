@@ -49,6 +49,8 @@ runs:
         EXPO_TOKEN: ${{ inputs.expo-token }}
         UPDATE_MESSAGE: ${{ inputs.message }}
       run: |
+        export EXPO_PUBLIC_COMMIT_HASH="$(git rev-parse --short=7 HEAD)"
+        export EXPO_PUBLIC_COMMIT_MESSAGE="$(git log -1 --pretty=%s)"
         if [ -z "$UPDATE_MESSAGE" ]; then
           UPDATE_MESSAGE="$(git log -1 --pretty=%B)"
         fi
