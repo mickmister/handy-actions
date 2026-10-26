@@ -1,9 +1,9 @@
 diff --git a/ios/HandyActivityCoordinator.swift b/ios/HandyActivityCoordinator.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..f1076d98b0b75bde4cc79292c109c8189130eeaf
+index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e5d727238
 --- /dev/null
 +++ b/ios/HandyActivityCoordinator.swift
-@@ -0,0 +1,290 @@
+@@ -0,0 +1,291 @@
 +import ActivityKit
 +import Foundation
 +import UIKit
@@ -11,6 +11,7 @@ index 0000000000000000000000000000000000000000..f1076d98b0b75bde4cc79292c109c818
 +// The ONLY Handy Actions Activity.request owner. All mutations (including native
 +// intents and JS refresh/renewal) share this queue across ActivityKit await points.
 +@MainActor
++@available(iOSApplicationExtension, unavailable)
 +enum HandyActivityCoordinator {
 +  static let name = "SharedHandyActivity"
 +  static let prefix = "handy-activity-v1:"
@@ -296,10 +297,10 @@ index 0000000000000000000000000000000000000000..f1076d98b0b75bde4cc79292c109c818
 +}
 diff --git a/ios/HandyBackgroundDelivery.swift b/ios/HandyBackgroundDelivery.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..d11acf108cba4a723714dc6236c0983a0bf2ad3a
+index 0000000000000000000000000000000000000000..e093cb9da7519dedc78408c61864e13c3b19d8c4
 --- /dev/null
 +++ b/ios/HandyBackgroundDelivery.swift
-@@ -0,0 +1,258 @@
+@@ -0,0 +1,259 @@
 +import Foundation
 +import Security
 +import CryptoKit
@@ -308,6 +309,7 @@ index 0000000000000000000000000000000000000000..d11acf108cba4a723714dc6236c0983a
 +// Called by the pinned Notifee callback before React event delivery. This class
 +// lives in the host, not the widget extension; credentials never enter activities.
 +@objc(HandyBackgroundDelivery)
++@available(iOSApplicationExtension, unavailable)
 +final class HandyBackgroundDelivery: NSObject, URLSessionTaskDelegate {
 +  private static let gate = NSLock()
 +  private enum Failure: Error { case retained(String) }
@@ -605,10 +607,10 @@ index 0000000000000000000000000000000000000000..b672a0c4cf60367976f03e0ca7bcde44
 +}
 diff --git a/ios/HandyWorkspaceSearch.swift b/ios/HandyWorkspaceSearch.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..892866408b0026319bf42af8635c0783d54cf531
+index 0000000000000000000000000000000000000000..f3fa342d8e8f2f26a40514cebda62f7a0ca89ba2
 --- /dev/null
 +++ b/ios/HandyWorkspaceSearch.swift
-@@ -0,0 +1,353 @@
+@@ -0,0 +1,366 @@
 +import ActivityKit
 +import Foundation
 +import UIKit
@@ -617,6 +619,7 @@ index 0000000000000000000000000000000000000000..892866408b0026319bf42af8635c0783
 +// Host-app only. The widget's LiveActivityIntent calls this through an ObjC
 +// runtime bridge; no network, credentials or Activity.request run in the extension.
 +@objc(HandyWorkspaceSearch)
++@available(iOSApplicationExtension, unavailable)
 +final class HandyWorkspaceSearch: NSObject, HandyWorkspaceSearchIntentHandler {
 +  private static let prefix = "handy-workspace-search-v1:"
 +  private static let category = "handy-workspace-search-input-v1"
@@ -883,9 +886,15 @@ index 0000000000000000000000000000000000000000..892866408b0026319bf42af8635c0783
 +    let result = try await worker.request(session, profile, "/api/workspaces")
 +    let values = try JSONDecoder().decode([Workspace].self, from: JSONSerialization.data(withJSONObject: result))
 +    var seen = Set<String>()
-+    return values.filter { validId($0.id) && $0.archived != true && $0.worktree_deleted != true && seen.insert($0.id).inserted }
-+      .map { ($0, date($0.updated_at)) }
-+      .sorted { $0.1 == $1.1 ? $0.0.id < $1.0.id : $0.1 > $1.1 }.map { $0.0 }
++    let eligible: [Workspace] = values.filter { workspace in
++      validId(workspace.id) && workspace.archived != true && workspace.worktree_deleted != true && seen.insert(workspace.id).inserted
++    }
++    let dated: [(workspace: Workspace, updated: Date)] = eligible.map { ($0, date($0.updated_at)) }
++    let sorted = dated.sorted { left, right in
++      if left.updated == right.updated { return left.workspace.id < right.workspace.id }
++      return left.updated > right.updated
++    }
++    return sorted.map { $0.workspace }
 +  }
 +  @MainActor @available(iOS 17.0, *)
 +  private static func query(_ initial: Search) async throws {
@@ -919,14 +928,20 @@ index 0000000000000000000000000000000000000000..892866408b0026319bf42af8635c0783
 +    let values = try await worker.request(session, profile, "/api/sessions?workspace_id=\(encoded)")
 +    let candidates = try JSONDecoder().decode([Session].self, from: JSONSerialization.data(withJSONObject: values)).filter { $0.workspace_id == workspace.id }
 +    guard candidates.allSatisfy({ validId($0.id) && date($0.created_at) != .distantPast }) else { throw SafeError(message: "Cannot verify the newest session. Review the workspace in VD.") }
-+    let sessions = candidates.map { ($0, date($0.created_at)) }
-+      .sorted { $0.1 == $1.1 ? $0.0.id < $1.0.id : $0.1 > $1.1 }.map { $0.0 }
++    let dated: [(session: Session, created: Date)] = candidates.map { ($0, date($0.created_at)) }
++    let sorted = dated.sorted { left, right in
++      if left.created == right.created { return left.session.id < right.session.id }
++      return left.created > right.created
++    }
++    let sessions: [Session] = sorted.map { $0.session }
 +    try Task.checkCancellation()
 +    guard let latest = sessions.first else { throw SafeError(message: "This workspace has no session. Create one in VD, then retry.") }
 +    guard let executor = latest.executor, !executor.isEmpty else { throw SafeError(message: "Newest session has no executor. Configure it in VD; no older session was selected.") }
 +    var current = try read(search.id)
 +    guard current.revision == search.revision, try HandyActivityCoordinator.containsSearch(search.id) else { return }
-+    let label = String((latest.name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? latest.name! : latest.created_at).prefix(80)) + " · " + executor
++    let sessionName = latest.name?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) ?? ""
++    let sessionTitle = sessionName.isEmpty ? latest.created_at : sessionName
++    let label = String(sessionTitle.prefix(80)) + " · " + executor
 +    let id = "workspace-message-\(search.id)-\(search.revision)"
 +    let payload: [String: Any] = ["type": "vd-agent", "originId": search.originId, "prefix": "", "session": ["id": latest.id, "workspaceId": workspace.id, "label": label, "executor": executor]]
 +    let rows: [[String: Any]] = [["id": id, "title": "\(workspace.title) · \(label)", "payload": payload]]
@@ -1120,7 +1135,7 @@ diff --git a/ios/Widgets/Buttons.swift b/ios/Widgets/Buttons.swift
 index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..a99bb834446a904b1e64e003816adadd1cc2eb81 100644
 --- a/ios/Widgets/Buttons.swift
 +++ b/ios/Widgets/Buttons.swift
-@@ -16,5 +16,12 @@ struct WidgetButtonView: ExpoSwiftUI.View {
+@@ -16,5 +16,12 @@ final class ButtonProps: ExpoUI.ButtonProps {
 +  @ViewBuilder
    var body: some View {
 -    SwiftUI.Button(
@@ -1142,10 +1157,14 @@ index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..a99bb834446a904b1e64e003816adadd
    }
  }
 diff --git a/ios/WidgetsModule.swift b/ios/WidgetsModule.swift
-index b1b4295e22726e6fe501aa5e514b56061dea57a1..bfe6039300b6dfe74f82b8640ffffff3c2a58655 100644
+index b1b4295e22726e6fe501aa5e514b56061dea57a1..24506769bf151d2539c10eea560ff32a2c127d7a 100644
 --- a/ios/WidgetsModule.swift
 +++ b/ios/WidgetsModule.swift
-@@ -17,6 +17,32 @@ public final class WidgetsModule: Module {
+@@ -12,2 +12,3 @@ let onPushToStartTokenReceived = "onExpoWidgetsPushToStartTokenReceived"
++@available(iOSApplicationExtension, unavailable)
+ public final class WidgetsModule: Module {
+   var pushToStartTokenObserverTask: Task<Void, Never>?
+@@ -17,6 +18,32 @@ public final class WidgetsModule: Module {
  
      Events(onPushToStartTokenReceived, onTokenReceived, onUserInteraction)
  
