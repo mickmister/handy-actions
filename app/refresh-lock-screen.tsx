@@ -21,7 +21,7 @@ export default function RefreshLockScreenScreen() {
   useEffect(()=>{const key=token??'initial';if(started.current===key)return;started.current=key;void refresh();},[token]);
   return <><Stack.Screen options={{title:'Refresh Lock Screen'}} /><ScrollView style={styles.screen} contentContainerStyle={styles.content}>
     <Text style={styles.title}>Refresh Lock Screen</Text><Text accessibilityLiveRegion="polite" style={styles.copy}>{message}</Text>
-    <Choice label={busy?'Refreshing…':'Recreate Live Activities again'} disabled={busy} onPress={()=>void refresh()} />
+    <Choice label={busy?'Refreshing…':'Recreate shared Live Activity again'} disabled={busy} onPress={()=>void refresh()} />
     <Text style={styles.copy}>The refresh notification is reposted for next time. iOS can dismiss notifications; reopen the app and refresh to restore it.</Text>
   </ScrollView></>;
 }

@@ -118,14 +118,14 @@ export default function SettingsScreen() {
               <Text style={surfaces.widgetPresetId === preset.id || (!surfaces.widgetPresetId && !preset.id) ? styles.primaryButtonText : styles.secondaryButtonText}>{preset.name}</Text>
             </Pressable>)}
           </View>
-          <Text style={styles.copy}>On iOS 17+, circular and rectangular input buttons post native capture notifications; inline widgets and older iOS use app-opening links. Rectangular widgets show two actions; Live Activities arrange all actions in rows of up to two. iOS controls available space, refresh timing and placement.</Text>
+          <Text style={styles.copy}>On iOS 17+, circular and rectangular input buttons post native capture notifications; inline widgets and older iOS use app-opening links. Rectangular widgets show two actions. One shared Live Activity has Actions and Workspaces views; action pages show up to four controls and browse all enabled presets in saved order. iOS controls available space, refresh timing and placement.</Text>
         </> : null}
         <Text style={styles.copy}>{handy.message}</Text>
       </View>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Recent VD workspaces</Text>
-        <Text style={styles.copy}>Show a separate Lock Screen Live Activity with the three most recently updated workspaces from a saved VD origin. Archived and deleted worktrees are excluded.</Text>
+        <Text style={styles.copy}>Show the three most recently updated workspaces in the Workspaces view of the shared Lock Screen Live Activity. Archived and deleted worktrees are excluded.</Text>
         <View style={styles.settingRow}>
           <Text style={styles.copy}>Show recent VD workspaces{Platform.OS !== 'ios' ? ' (iOS only)' : ''}</Text>
           <Switch accessibilityLabel="Show recent VD workspaces" value={recentWorkspaces.enabled}
@@ -145,7 +145,7 @@ export default function SettingsScreen() {
         {originMessage ? <Text style={styles.copy}>{originMessage}</Text> : null}
         {!originChoices.some(origin => origin.id === recentWorkspaces.originId) ? <Text style={styles.copy}>Choose a saved VD origin to enable the list.</Text> : null}
         <Link style={styles.link} href="/origins">Manage origins / test VD connection</Link>
-        <Text style={styles.copy}>Tap a workspace name to open its origin’s /workspaces/:workspaceId page in your browser. Browser authentication is separate from the app’s saved API headers.</Text>
+        <Text style={styles.copy}>Tap a workspace to get a message-input notification for its newest-created session. Expand it and select Add Note to write and send; short-tap its body to open the workspace in your browser. Browser authentication is separate from the app’s saved API headers.</Text>
         <Text style={styles.copy}>Refreshes when the app opens or returns to the foreground, and when you refresh Lock Screen surfaces. Live Activities must also be enabled above.</Text>
         <Pressable style={styles.darkButton} disabled={!handy.loaded || syncing || Platform.OS !== 'ios'} onPress={() => void refreshNotifications()}>
           <Text style={styles.darkButtonText}>{syncing ? 'Applying…' : 'Refresh recent workspaces'}</Text>

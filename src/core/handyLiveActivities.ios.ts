@@ -1,57 +1,46 @@
 import * as ExpoLinking from 'expo-linking';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-import {
-  enabledPresets,
-  liveActivityPropsForPreset,
-  liveActivityActionRowsForPreset,
-  surfaceSettings,
-  type HandyActionsLiveActivityProps,
-  type HandyState,
-} from './handyModel';
-import HandyActionsLiveActivity from '../liveActivities/HandyActionsLiveActivity';
+import { fetch } from 'expo/fetch';
+import { requireOptionalNativeModule } from 'expo';
+import { sharedActivityConfiguration } from './sharedActivityModel';
+import type { HandyState } from './handyModel';
+import SharedHandyActivity from '../liveActivities/SharedHandyActivity';
 import { activityTheme } from './handyThemes';
-import { isInputPayload } from './handyModel';
 import { nativeCaptureTarget } from './nativeCaptureTarget';
-import { reconcileActivities } from './activityLifecycle';
 import { nativeSiteIcon } from './nativeSiteIcon';
+import { loadRecentWorkspaces, recentWorkspacesEnabled, type RecentWorkspacesSnapshot } from './recentWorkspaces';
+import { origins } from './origins';
+import { createRequestClient } from './requestClient';
+import { createVdClient } from './vdClient';
 
-const LIVE_ACTIVITY_STALE_MS = 7.5 * 60 * 60 * 1000;
+void SharedHandyActivity;
+const widgets = requireOptionalNativeModule<{
+  syncHandyActivity?: (configuration: string, renew: boolean) => Promise<string>;
+}>('ExpoWidgets');
 
-export async function syncPresetLiveActivities(state: HandyState, renew = false): Promise<void> {
-  const endedProps = endedLiveActivityProps();
-  const instances = HandyActionsLiveActivity.getInstances();
-  const mapping: Record<string,string> = JSON.parse(await AsyncStorage.getItem('handy-actions/activity-ids/v1')??'{}');
-  const activePresets = surfaceSettings(state).liveActivities ? enabledPresets(state) : [];
-  const staleDate = new Date(Date.now() + LIVE_ACTIVITY_STALE_MS);
-  const desired = activePresets.map(preset => {
-    const openUrl = ExpoLinking.createURL('/preset-actions', { queryParams: { presetId: preset.id } });
-    const props = liveActivityPropsForPreset(preset, new Date().toISOString(), openUrl);
-    props.theme = activityTheme(state.theme,props.updatedAt);
-    props.actionRows = liveActivityActionRowsForPreset(preset, (action) => ({
-      title: action.name,
-      siteGlyph: nativeSiteIcon(action.payload),
+export async function syncPresetLiveActivities(state: HandyState, renew = false): Promise<string> {
+  if (!widgets?.syncHandyActivity) return 'Install the updated native build to use the single Handy Actions Live Activity.';
+  const configure = (recent?: RecentWorkspacesSnapshot) => sharedActivityConfiguration(state, {
+    openUrl: ExpoLinking.createURL('/settings'), recent,
+    theme: activityTheme(state.theme, new Date().toISOString()),
+    link: (action, presetId, input) => ({
+      title: action.name, siteGlyph: nativeSiteIcon(action.payload),
       systemImage: action.payload.type === 'notes' ? 'note.text' : action.payload.type === 'vd-workspace-search' ? 'magnifyingglass' : undefined,
-      url: ExpoLinking.createURL(action.payload.type === 'notes' ? '/notes' : '/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: isInputPayload(action.payload) ? '1' : '0' } }),
-      captureTarget: nativeCaptureTarget(preset.id, action),
-    }));
-    return {presetId:preset.id,props,openUrl};
+      url: ExpoLinking.createURL(action.payload.type === 'notes' ? '/notes' : '/capture', {
+        queryParams: { presetId, actionId: action.id, notification: input ? '1' : '0' },
+      }),
+      captureTarget: nativeCaptureTarget(presetId, action),
+    }),
   });
-  const nextMapping=await reconcileActivities<HandyActionsLiveActivityProps>(instances,mapping,desired,{
-    renew,endedProps,staleDate,start:(props,url,date)=>HandyActionsLiveActivity.start(props,url,date),
+  if (!recentWorkspacesEnabled(state)) {
+    return `${await widgets.syncHandyActivity(JSON.stringify(configure()), renew)} Recent VD workspaces off.`;
+  }
+  // Publish actions/navigation before a slow VD fetch. The second transaction
+  // updates data only; it cannot reset native search or the selected view.
+  await widgets.syncHandyActivity(JSON.stringify(configure({ originId: state.recentWorkspaces?.originId ?? '', links: [], message: 'Refreshing recent VD workspaces…', openUrl: '' })), renew);
+  const recent = await loadRecentWorkspaces(state, {
+    connection: origins.connection,
+    workspaces: profile => createVdClient(createRequestClient(async () => profile, fetch), profile.id).workspaces(),
   });
-  await AsyncStorage.setItem('handy-actions/activity-ids/v1',JSON.stringify(nextMapping));
-}
-
-function endedLiveActivityProps(): HandyActionsLiveActivityProps {
-  return {
-    presetId: '',
-    presetName: 'Handy Actions',
-    actionCount: 0,
-    firstAction: '',
-    secondAction: '',
-    thirdAction: '',
-    updatedAt: new Date().toISOString(),
-    openUrl: ExpoLinking.createURL('/'),
-  };
+  const message = await widgets.syncHandyActivity(JSON.stringify(configure(recent)), false);
+  return [message, recent?.message || (recent ? 'Recent VD workspaces refreshed in the Workspaces view.' : 'Recent VD workspaces off.')].join(' ');
 }

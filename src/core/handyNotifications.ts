@@ -40,8 +40,8 @@ import { httpRequestSpec } from './httpActions';
 import { nativeActionInbox } from './nativeActionInbox';
 import { isRefreshPress, REFRESH_NOTIFICATION_ID, REFRESH_PRESS_ID } from './lockScreenRefresh';
 import { notificationEditorContext } from './notificationEditorContext';
-import { syncRecentWorkspacesLiveActivity } from './recentWorkspacesLiveActivity';
 import { beginWorkspaceSearch, workspaceSearchAvailable } from './workspaceSearch';
+import { workspaceNotificationBrowserUrl } from './workspaceNotificationBrowser';
 
 const CHANNEL_ID = 'handy-actions';
 const INPUT_CATEGORY = 'handy-text-input';
@@ -153,13 +153,9 @@ async function syncSurfaces(state: HandyState, renew: boolean, requestPermission
   const settings = surfaceSettings(state);
   const messages: string[] = [];
   try {
-    await syncPresetLiveActivities(state, renew);
-    if (Platform.OS === 'ios') messages.push(settings.liveActivities ? 'Live Activities refreshed.' : 'Live Activities off.');
-  } catch (error) { messages.push(`Live Activity: ${errorMessage(error)}`); }
-  try {
-    const message = await syncRecentWorkspacesLiveActivity(state, renew);
+    const message = await syncPresetLiveActivities(state, renew);
     if (message) messages.push(message);
-  } catch { messages.push('Could not update the recent VD workspaces Live Activity.'); }
+  } catch (error) { messages.push(`Live Activity: ${errorMessage(error)}`); }
   try {
     await syncLockScreenWidget(state);
     if (Platform.OS === 'ios') messages.push(settings.lockScreenWidgets ? 'Widget content published.' : 'Widgets off.');
@@ -265,6 +261,8 @@ export async function handleNotificationEvent(event: Event): Promise<void> {
 }
 
 async function openPressAction(pressId: unknown, data: unknown, input?: string, notificationId?: string): Promise<void> {
+  const browserUrl = workspaceNotificationBrowserUrl(pressId, data, input);
+  if (browserUrl) { await Linking.openURL(browserUrl); return; }
   if (isRefreshPress(pressId, data, notificationId)) {
     deliverPressTarget({type:'refresh',token:dataString(data,'refreshToken')??makeId('refresh')});
     return;

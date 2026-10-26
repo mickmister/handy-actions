@@ -1,9 +1,280 @@
+diff --git a/ios/HandyActivityCoordinator.swift b/ios/HandyActivityCoordinator.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..93cad949afecefea4b17eb3b63796266fe2bd150
+--- /dev/null
++++ b/ios/HandyActivityCoordinator.swift
+@@ -0,0 +1,265 @@
++import ActivityKit
++import Foundation
++import UIKit
++
++// The ONLY Handy Actions Activity.request owner. All mutations (including native
++// intents and JS refresh/renewal) share this queue across ActivityKit await points.
++@MainActor
++enum HandyActivityCoordinator {
++  static let name = "SharedHandyActivity"
++  static let prefix = "handy-activity-v1:"
++  private static var tail: Task<Void, Never>?
++  private struct State: Codable {
++    var configuration = "{}"
++    var revision = UUID().uuidString
++    var view = "actions"
++    var previousView = "actions"
++    var presetId = ""
++    var page = 0
++    var searchId: String?
++    var searchProps: String?
++  }
++  struct Failure: LocalizedError {
++    let message: String
++    var errorDescription: String? { message }
++  }
++  private static func transaction<T>(_ operation: @escaping @MainActor () async throws -> T) async throws -> T {
++    let previous = tail
++    let task = Task<T, Error> { @MainActor in
++      await previous?.value
++      return try await operation()
++    }
++    tail = Task { @MainActor in _ = try? await task.value }
++    return try await task.value
++  }
++  private static func file() throws -> URL {
++    let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
++    return directory.appendingPathComponent("HandySharedActivity-v1.json")
++  }
++  private static func read() throws -> State {
++    let url = try file()
++    return FileManager.default.fileExists(atPath: url.path) ? try JSONDecoder().decode(State.self, from: Data(contentsOf: url)) : State()
++  }
++  private static func save(_ state: State) throws {
++    try JSONEncoder().encode(state).write(to: file(), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
++  }
++  private static func object(_ text: String) throws -> [String: Any] {
++    guard let value = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw Failure(message: "Open Handy Actions to refresh the activity configuration.") }
++    return value
++  }
++  private static func encode(_ value: Any) throws -> String { String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self) }
++  private static func normalize(_ state: inout State, _ config: [String: Any]) {
++    if !["actions", "workspaces", "search"].contains(state.view) { state.view = "actions" }
++    if !["actions", "workspaces"].contains(state.previousView) { state.previousView = "actions" }
++    let presets = config["presets"] as? [[String: Any]] ?? []
++    if !presets.contains(where: { $0["id"] as? String == state.presetId }) {
++      state.presetId = presets.first?["id"] as? String ?? ""; state.page = 0
++    }
++    let actions = presets.first(where: { $0["id"] as? String == state.presetId })?["actions"] as? [[String: Any]] ?? []
++    state.page = max(0, min(state.page, max(0, (actions.count - 1) / 4)))
++    if state.view == "actions", presets.isEmpty, config["recent"] != nil { state.view = "workspaces" }
++  }
++  @available(iOS 16.2, *)
++  private static func activities() -> [Activity<LiveActivityAttributes>] {
++    // ActivityKit enumeration is already scoped to this app. Retire unknown
++    // legacy ExpoWidgets layouts too, rather than leaving an extra live card.
++    Activity<LiveActivityAttributes>.activities.filter { $0.activityState == .active || $0.activityState == .stale }
++  }
++  @available(iOS 16.2, *)
++  private static func reconcile(_ state: State, allowStart: Bool, renew: Bool = false) async throws {
++    if #unavailable(iOS 17.0) {
++      for activity in activities() { await activity.end(nil, dismissalPolicy: .immediate) }
++      return
++    }
++    let config = try object(state.configuration)
++    let useful = !(config["presets"] as? [Any] ?? []).isEmpty || config["recent"] != nil || state.searchId != nil
++    let enabled = config["enabled"] as? Bool == true && useful
++    let instances = activities()
++    let keep = enabled && !renew ? instances.first(where: { $0.content.state.name == name }) : nil
++    for activity in instances where activity.id != keep?.id { await activity.end(nil, dismissalPolicy: .immediate) }
++    // Do not allocate after a failed/incomplete retirement, even across migration.
++    guard activities().allSatisfy({ $0.id == keep?.id }) else { throw Failure(message: "Could not retire an old activity. Refresh Lock Screen again.") }
++    guard enabled else { return }
++    let props = try presentation(state, config)
++    let content = ActivityContent(state: LiveActivityAttributes.ContentState(name: name, props: try encode(props)), staleDate: Date().addingTimeInterval(1800))
++    if let keep { await keep.update(content); return }
++    guard allowStart || UIApplication.shared.applicationState == .active else {
++      throw Failure(message: "Open Handy Actions or tap a Live Activity action to restore the shared activity.")
++    }
++    guard ActivityAuthorizationInfo().areActivitiesEnabled else { throw Failure(message: "Allow Live Activities for Handy Actions in iOS Settings.") }
++    do {
++      _ = try Activity.request(attributes: LiveActivityAttributes(url: config["openUrl"] as? String), content: content, pushType: nil)
++    } catch { throw Failure(message: "iOS could not start the shared activity. Check Live Activity permission or dismiss an unused activity and retry.") }
++  }
++  @available(iOS 16.2, *)
++  static func sync(_ configuration: String, renew: Bool) async throws -> String {
++    try await transaction {
++      let config = try object(configuration)
++      var state = try read()
++      if state.configuration != configuration { state.revision = UUID().uuidString }
++      state.configuration = configuration
++      if config["enabled"] as? Bool != true { state.searchId = nil; state.searchProps = nil; state.view = "actions" }
++      normalize(&state, config); try save(state)
++      try await reconcile(state, allowStart: false, renew: renew)
++      if #unavailable(iOS 17.0) { return "The shared Live Activity requires iOS 17 or later. Actions remain available in the app." }
++      return activities().isEmpty ? "Live Activity off or no enabled content." : "One Handy Actions Live Activity refreshed (\(state.view))."
++    }
++  }
++  @available(iOS 16.2, *)
++  static func beginSearch(id: String, props: [String: Any]) async throws {
++    try await transaction {
++      var state = try read()
++      let config = try object(state.configuration)
++      guard config["enabled"] as? Bool == true else { throw Failure(message: "Enable Live Activities in Handy Actions Settings first.") }
++      if state.view != "search" { state.previousView = state.view }
++      state.view = "search"; state.searchId = id; state.searchProps = try encode(props)
++      try save(state)
++      try await reconcile(state, allowStart: true)
++    }
++  }
++  @available(iOS 16.2, *)
++  static func isCurrentSearch(_ id: String) throws -> Bool {
++    try containsSearch(id) && !activities().filter { $0.content.state.name == name }.isEmpty
++  }
++  static func containsSearch(_ id: String) throws -> Bool {
++    let state = try read()
++    let config = try object(state.configuration)
++    return state.searchId == id && config["enabled"] as? Bool == true
++  }
++  @available(iOS 16.2, *)
++  static func publishSearch(id: String, props: [String: Any], ifCurrent: @escaping @MainActor () -> Bool) async throws {
++    try await transaction {
++      var state = try read()
++      guard state.searchId == id, ifCurrent() else { return }
++      guard !activities().filter({ $0.content.state.name == name }).isEmpty else { throw Failure(message: "Search activity was dismissed. Start again from the app or widget.") }
++      state.searchProps = try encode(props); try save(state)
++      // Preserve the selected view even when a query finishes after Back/Home.
++      try await reconcile(state, allowStart: false)
++    }
++  }
++  @available(iOS 16.2, *)
++  static func completeSearch(_ id: String, ifCurrent: @escaping @MainActor () -> Bool) async throws {
++    try await transaction {
++      var state = try read()
++      guard state.searchId == id, ifCurrent() else { return }
++      if state.view == "search" { state.view = state.previousView }
++      state.searchId = nil; state.searchProps = nil
++      normalize(&state, try object(state.configuration)); try save(state)
++      // A user may dismiss the card while the selected session is resolving.
++      // Still deliver the explicitly requested message notification; don't undo
++      // that dismissal by starting another activity from the callback.
++      if !activities().isEmpty { try await reconcile(state, allowStart: false) }
++    }
++  }
++  private static func target(_ state: State, _ operation: String, _ extra: [String: Any] = [:]) throws -> String {
++    var value: [String: Any] = ["operation": operation, "revision": state.revision]
++    extra.forEach { value[$0.key] = $0.value }
++    return prefix + (try encode(value))
++  }
++  private static func presentation(_ state: State, _ config: [String: Any]) throws -> [String: Any] {
++    var props: [String: Any] = ["view": state.view, "title": "Handy Actions", "message": ""]
++    if let theme = config["theme"] { props["theme"] = theme }
++    var navigation: [[String: String]] = []
++    func control(_ title: String, _ operation: String, _ extra: [String: Any] = [:]) throws -> [String: String] { ["title": title, "target": try target(state, operation, extra)] }
++    if state.view == "search", let text = state.searchProps {
++      let search = try object(text)
++      props["title"] = search["title"]; props["message"] = search["message"]; props["results"] = search["results"]
++      navigation.append(try control("Back", "back"))
++      if let again = search["searchAgain"] as? String { navigation.append(["title": "Search", "target": again]) }
++      if search["message"] as? String == "" {
++        if let previous = search["previous"] as? String { navigation.append(["title": "‹", "target": previous]) }
++        if let next = search["next"] as? String { navigation.append(["title": "›", "target": next]) }
++      }
++    } else if state.view == "workspaces" {
++      props["title"] = "Recent VD workspaces"
++      if let recent = config["recent"] as? [String: Any] {
++        props["message"] = recent["message"] ?? ""
++        props["results"] = try (recent["links"] as? [[String: Any]] ?? []).prefix(3).enumerated().map { index, link in
++          ["title": String((link["title"] as? String ?? "Workspace").prefix(60)), "target": try target(state, "recent", ["index": index])]
++        }
++        if let originId = recent["originId"] as? String, !originId.isEmpty {
++          navigation.append(try control("Search", state.searchId == nil ? "search" : "view", state.searchId == nil ? [:] : ["view": "search"]))
++        }
++      } else { props["message"] = "Enable recent VD workspaces and choose an origin in Settings." }
++      if !(config["presets"] as? [Any] ?? []).isEmpty { navigation.insert(try control("Actions", "view", ["view": "actions"]), at: 0) }
++    } else {
++      let presets = config["presets"] as? [[String: Any]] ?? []
++      if let index = presets.firstIndex(where: { $0["id"] as? String == state.presetId }) {
++        let preset = presets[index]
++        let actions = preset["actions"] as? [[String: Any]] ?? []
++        let start = state.page * 4
++        props["title"] = String((preset["name"] as? String ?? "Actions").prefix(60)) + " · \(state.page + 1)/\(max(1, (actions.count + 3) / 4))"
++        var rows: [[[String: Any]]] = []
++        for action in actions.dropFirst(start).prefix(4) {
++          var link: [String: Any] = ["title": String((action["title"] as? String ?? "Action").prefix(48)), "url": action["url"] as? String ?? config["openUrl"] as? String ?? ""]
++          if action["captureTarget"] is String { link["captureTarget"] = try target(state, "action", ["presetId": state.presetId, "actionId": action["id"] as? String ?? ""]) }
++          if let glyph = action["siteGlyph"] { link["siteGlyph"] = glyph }
++          if let symbol = action["systemImage"] { link["systemImage"] = symbol }
++          if rows.isEmpty || rows[rows.count - 1].count == 2 { rows.append([]) }
++          rows[rows.count - 1].append(link)
++        }
++        props["rows"] = rows
++        if state.page > 0 || index > 0 { navigation.append(try control("‹", "page", ["direction": -1])) }
++        if start + 4 < actions.count || index + 1 < presets.count { navigation.append(try control("›", "page", ["direction": 1])) }
++      } else { props["message"] = "Enable a preset with actions in the app." }
++      navigation.insert(try control("Workspaces", "view", ["view": "workspaces"]), at: 0)
++      if state.searchId != nil { navigation.append(try control("Search", "view", ["view": "search"])) }
++    }
++    props["navigation"] = navigation
++    let bytes = try JSONSerialization.data(withJSONObject: ["name": name, "props": try encode(props)])
++    if bytes.count > 3400 {
++      props.removeValue(forKey: "rows"); props.removeValue(forKey: "results")
++      props["message"] = "This page exceeds the Lock Screen size budget. Open the app to use its actions."
++    }
++    guard try JSONSerialization.data(withJSONObject: ["name": name, "props": encode(props)]).count <= 3500 else { throw Failure(message: "Activity content is too large. Shorten labels and refresh.") }
++    return props
++  }
++  @available(iOS 17.0, *)
++  static func perform(_ text: String) async throws {
++    let value = try object(String(text.dropFirst(prefix.count)))
++    // Resolve a snapshot under the same queue as config writes. Network/capture
++    // work happens AFTER this transaction so it cannot block Home/navigation.
++    let command: [String: Any] = try await transaction {
++      var state = try read()
++      guard value["revision"] as? String == state.revision else { throw Failure(message: "These controls changed. Try the updated activity.") }
++      let config = try object(state.configuration)
++      guard config["enabled"] as? Bool == true else { throw Failure(message: "Live Activities are disabled in Handy Actions.") }
++      let operation = value["operation"] as? String ?? ""
++      if operation == "action" {
++        let presets = config["presets"] as? [[String: Any]] ?? []
++        let preset = presets.first { $0["id"] as? String == value["presetId"] as? String }
++        guard let action = (preset?["actions"] as? [[String: Any]])?.first(where: { $0["id"] as? String == value["actionId"] as? String }), let target = action["captureTarget"] as? String else { throw Failure(message: "This action changed. Refresh the activity.") }
++        return ["captureTarget": target]
++      }
++      if operation == "recent" || operation == "search" {
++        guard let recent = config["recent"] as? [String: Any], let origin = recent["originId"] as? String, !origin.isEmpty else { throw Failure(message: "Choose a VD origin in Settings.") }
++        if operation == "search" { return ["originId": origin] }
++        let links = recent["links"] as? [[String: Any]] ?? []
++        guard let index = value["index"] as? Int, links.indices.contains(index), let id = links[index]["id"] as? String else { throw Failure(message: "Workspace results changed. Refresh and try again.") }
++        return ["originId": origin, "workspaceId": id, "title": links[index]["title"] as? String ?? "Workspace"]
++      }
++      if operation == "view", let view = value["view"] as? String, ["actions", "workspaces", "search"].contains(view), view != "search" || state.searchId != nil { state.view = view }
++      if operation == "back" { state.view = state.previousView }
++      if operation == "page", let direction = value["direction"] as? Int, [-1, 1].contains(direction) {
++        let presets = config["presets"] as? [[String: Any]] ?? []
++        if let index = presets.firstIndex(where: { $0["id"] as? String == state.presetId }) {
++          let count = (presets[index]["actions"] as? [Any] ?? []).count
++          if direction < 0, state.page == 0, index > 0 {
++            state.presetId = presets[index - 1]["id"] as? String ?? ""
++            state.page = max(0, ((presets[index - 1]["actions"] as? [Any] ?? []).count - 1) / 4)
++          } else if direction > 0, (state.page + 1) * 4 >= count, index + 1 < presets.count { state.presetId = presets[index + 1]["id"] as? String ?? ""; state.page = 0 }
++          else { state.page += direction }
++        }
++      }
++      normalize(&state, config); try save(state)
++      try await reconcile(state, allowStart: true)
++      return [:]
++    }
++    if let capture = command["captureTarget"] as? String {
++      if capture.hasPrefix("handy-workspace-search-v1:") { try await HandyWorkspaceSearch.perform(capture) }
++      else { _ = try await HandyNoteCapture.post(target: capture) }
++    } else if let origin = command["originId"] as? String {
++      try await HandyWorkspaceSearch.recent(originId: origin, workspaceId: command["workspaceId"] as? String, title: command["title"] as? String)
++    }
++  }
++}
 diff --git a/ios/HandyBackgroundDelivery.swift b/ios/HandyBackgroundDelivery.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..e66c66db53272cd3f5fcf7c3a10ebf9085de36d0
+index 0000000000000000000000000000000000000000..d11acf108cba4a723714dc6236c0983a0bf2ad3a
 --- /dev/null
 +++ b/ios/HandyBackgroundDelivery.swift
-@@ -0,0 +1,253 @@
+@@ -0,0 +1,258 @@
 +import Foundation
 +import Security
 +import CryptoKit
@@ -134,10 +405,15 @@ index 0000000000000000000000000000000000000000..e66c66db53272cd3f5fcf7c3a10ebf90
 +    let content = UNMutableNotificationContent()
 +    content.title = success ? "Sent" : "Continue in Handy Actions"
 +    content.body = message
++    if success, let original = notification["data"] as? [String: Any], let url = original["workspaceBrowserUrl"] as? String {
++      content.userInfo = ["__notifee_notification": ["id": "handy-background-result-\(id)", "data": ["workspaceBrowserUrl": url]]]
++    }
 +    if !success {
 +      content.categoryIdentifier = "handy-action-editor-v1"
 +      var updated = notification
 +      var data = notification["data"] as? [String: Any] ?? [:]
++      // Failed/uncertain writes retain the editor recovery entry point and text.
++      data.removeValue(forKey: "workspaceBrowserUrl")
 +      data["captureActionId"] = actionId; data["editorText"] = text; data["recoverySubmissionId"] = id
 +      updated["data"] = data; updated["ios"] = ["categoryId": content.categoryIdentifier]
 +      content.userInfo = ["__notifee_notification": updated]
@@ -304,10 +580,10 @@ index 0000000000000000000000000000000000000000..b672a0c4cf60367976f03e0ca7bcde44
 +}
 diff --git a/ios/HandyWorkspaceSearch.swift b/ios/HandyWorkspaceSearch.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b40d8b61de
+index 0000000000000000000000000000000000000000..892866408b0026319bf42af8635c0783d54cf531
 --- /dev/null
 +++ b/ios/HandyWorkspaceSearch.swift
-@@ -0,0 +1,339 @@
+@@ -0,0 +1,353 @@
 +import ActivityKit
 +import Foundation
 +import UIKit
@@ -318,7 +594,6 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +@objc(HandyWorkspaceSearch)
 +final class HandyWorkspaceSearch: NSObject, HandyWorkspaceSearchIntentHandler {
 +  private static let prefix = "handy-workspace-search-v1:"
-+  private static let activityName = "WorkspaceSearchActivity"
 +  private static let category = "handy-workspace-search-input-v1"
 +  private static let submit = "handy-workspace-search-submit"
 +  private struct SafeError: LocalizedError {
@@ -354,7 +629,7 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +  }
 +
 +  private static func safeMessage(_ error: Error) -> String {
-+    (error as? SafeError)?.message ?? "Could not complete workspace search. Check the connection and try again."
++    (error as? SafeError)?.message ?? (error as? HandyActivityCoordinator.Failure)?.message ?? "Could not complete workspace search. Check the connection and try again."
 +  }
 +
 +  // End exactly once on completion OR expiration. Cancellation propagates to
@@ -362,7 +637,7 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +  @MainActor
 +  private static func withRuntime<T>(_ operation: @escaping @MainActor () async throws -> T) async throws -> T {
 +    var identifier = UIBackgroundTaskIdentifier.invalid
-+    let task = Task { try Task.checkCancellation(); return try await operation() }
++    let task = Task<T, Error> { @MainActor in try Task.checkCancellation(); return try await operation() }
 +    @MainActor func finish() {
 +      if identifier != .invalid {
 +        UIApplication.shared.endBackgroundTask(identifier)
@@ -380,12 +655,28 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +  static func handleTarget(_ target: String, completion: @escaping (String?) -> Void) {
 +    Task { @MainActor in
 +      guard #available(iOS 17.0, *) else { completion("Requires iOS 17 or later."); return }
-+      do { try await withRuntime { try await perform(target) }; completion(nil) }
++      do {
++        try await withRuntime {
++          if target.hasPrefix(HandyActivityCoordinator.prefix) { try await HandyActivityCoordinator.perform(target) }
++          else { try await perform(target) }
++        }
++        completion(nil)
++      }
 +      catch { completion(safeMessage(error)) }
 +    }
 +  }
 +
 +  static func handle(response: UNNotificationResponse, notification: [String: Any], completion: @escaping () -> Void) -> Bool {
++    // Fresh workspace message body taps go straight to the VD browser, including
++    // a cold-start response. Text-input actions still use the journaled sender.
++    if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
++       let data = notification["data"] as? [String: Any], let text = data["workspaceBrowserUrl"] as? String,
++       let url = URL(string: text), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
++       url.host != nil, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
++       url.path.hasPrefix("/workspaces/") {
++      Task { @MainActor in UIApplication.shared.open(url, options: [:]) { _ in completion() } }
++      return true
++    }
 +    guard response.actionIdentifier == submit,
 +          let response = response as? UNTextInputNotificationResponse,
 +          let data = notification["data"] as? [String: Any],
@@ -395,14 +686,15 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +      do {
 +        try await withRuntime {
 +          var search = try read(id)
-+          guard search.revision == revision, currentActivity(search) != nil else { return } // duplicate/stale callback
++          guard search.revision == revision, try HandyActivityCoordinator.containsSearch(id) else { return } // duplicate/stale callback
 +          search.revision = UUID().uuidString
 +          search.query = String(response.userText.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
 +          search.workspaces = []; search.page = 0; search.selected = nil; search.selecting = false
 +          try save(search)
++          guard currentSearch(search) else { throw SafeError(message: "The shared activity expired or was dismissed. Tap this notification to restore it in the app; your query is kept.") }
 +          guard response.userText.trimmingCharacters(in: .whitespacesAndNewlines).count <= 80 else { throw SafeError(message: "Use at most 80 characters for a workspace-name search.") }
 +          try await query(search)
-+          if !search.query.isEmpty, try read(id).revision == search.revision, currentActivity(search) != nil {
++          if !search.query.isEmpty, try read(id).revision == search.revision, currentSearch(search) {
 +            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [response.notification.request.identifier])
 +          }
 +        }
@@ -419,6 +711,23 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +  @MainActor @available(iOS 17.0, *)
 +  static func begin(action: String, presetId: String, query text: String?) async throws -> String {
 +    try await withRuntime { try await beginSearch(action: action, presetId: presetId, query: text) }
++  }
++
++  @MainActor @available(iOS 17.0, *)
++  static func recent(originId: String, workspaceId: String?, title: String?) async throws {
++    let action: [String: Any] = ["id": "recent-workspaces", "name": "Search VD workspaces", "payload": ["type": "vd-workspace-search", "originId": originId]]
++    let actionText = String(decoding: try JSONSerialization.data(withJSONObject: action), as: UTF8.self)
++    guard let workspaceId else { _ = try await beginSearch(action: actionText, presetId: "recent-workspaces", query: nil); return }
++    let workspace = Workspace(id: workspaceId, name: title, updated_at: nil, archived: nil, worktree_deleted: nil)
++    var search = Search(id: UUID().uuidString, revision: UUID().uuidString, originId: originId, presetId: "recent-workspaces", action: actionText)
++    search.workspaces = [workspace]; search.selecting = true
++    try save(search)
++    try await HandyActivityCoordinator.beginSearch(id: search.id, props: content(search, message: "Finding newest session…"))
++    do { try await select(search, workspace: workspace) }
++    catch {
++      if currentSearch(search) { search.selecting = false; try save(search); try? await publish(search, message: safeMessage(error)) }
++      throw error
++    }
 +  }
 +
 +  @MainActor @available(iOS 17.0, *)
@@ -445,26 +754,18 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +    var search = Search(id: UUID().uuidString, revision: UUID().uuidString, originId: originId, presetId: presetId, action: action)
 +    if let text { search.query = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)) }
 +    try save(search)
-+    let state = try content(search, message: text == nil ? "Enter a workspace name in the search notification." : "Searching…")
++    let props = try content(search, message: text == nil ? "Enter a workspace name in the search notification." : "Searching…")
 +    // Admission happens ONLY here, from foreground or an eligible LiveActivityIntent,
 +    // before the user submits notification input. The reply only updates this activity.
-+    let instances = activities()
-+    if let existing = instances.first {
-+      await existing.update(ActivityContent(state: state, staleDate: Date().addingTimeInterval(1800)))
-+      for duplicate in instances.dropFirst() { await duplicate.end(nil, dismissalPolicy: .immediate) }
-+    } else {
-+      do {
-+        _ = try Activity.request(attributes: LiveActivityAttributes(url: nil), content: ActivityContent(state: state, staleDate: Date().addingTimeInterval(1800)), pushType: nil)
-+      } catch { throw SafeError(message: "iOS could not start search results. Dismiss an unused Live Activity and retry from the app.") }
-+    }
-+    guard currentActivity(search) != nil else { throw SafeError(message: "A newer search replaced this one. Use the current search activity.") }
++    try await HandyActivityCoordinator.beginSearch(id: search.id, props: props)
++    guard currentSearch(search) else { throw SafeError(message: "A newer search replaced this one. Use the current search activity.") }
 +    if text != nil { try await query(search); return "Choose a workspace in the search-results Live Activity." }
 +    try await postQuery(search)
 +    return "Search notification posted. Expand it and choose Search workspaces."
 +  }
 +
 +  @MainActor @available(iOS 17.0, *)
-+  private static func perform(_ target: String) async throws {
++  static func perform(_ target: String) async throws {
 +    guard target.hasPrefix(prefix),
 +          let value = try JSONSerialization.jsonObject(with: Data(target.dropFirst(prefix.count).utf8)) as? [String: Any],
 +          let operation = value["operation"] as? String else { throw SafeError(message: "Refresh this search action in Handy Actions.") }
@@ -475,7 +776,7 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +    }
 +    guard let id = value["searchId"] as? String, let revision = value["revision"] as? String else { throw SafeError(message: "Start a new workspace search.") }
 +    var search = try read(id)
-+    guard search.revision == revision, currentActivity(search) != nil else { throw SafeError(message: "These results are no longer current. Start a new search.") }
++    guard search.revision == revision, currentSearch(search) else { throw SafeError(message: "These results are no longer current. Start a new search.") }
 +    if operation == "again" {
 +      search.revision = UUID().uuidString; search.workspaces = []; search.query = ""; search.page = 0; search.selected = nil; search.selecting = false
 +      try save(search)
@@ -513,24 +814,14 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +  private static func save(_ search: Search) throws {
 +    try JSONEncoder().encode(search).write(to: file(search.id), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
 +  }
-+  @available(iOS 16.2, *)
-+  private static func activities() -> [Activity<LiveActivityAttributes>] {
-+    Activity<LiveActivityAttributes>.activities.filter { $0.content.state.name == activityName && ($0.activityState == .active || $0.activityState == .stale) }
-+  }
-+  @available(iOS 16.2, *)
-+  private static func currentActivity(_ search: Search) -> Activity<LiveActivityAttributes>? {
-+    activities().first { activity in
-+      guard let props = try? JSONSerialization.jsonObject(with: Data(activity.content.state.props.utf8)) as? [String: Any] else { return false }
-+      return props["searchId"] as? String == search.id
-+    }
-+  }
++  @MainActor @available(iOS 16.2, *)
++  private static func currentSearch(_ search: Search) -> Bool { (try? HandyActivityCoordinator.isCurrentSearch(search.id)) == true }
 +  private static func target(_ search: Search, _ operation: String, _ extra: [String: Any] = [:]) throws -> String {
 +    var value: [String: Any] = ["operation": operation, "searchId": search.id, "revision": search.revision]
 +    extra.forEach { value[$0.key] = $0.value }
 +    return prefix + String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
 +  }
-+  @available(iOS 16.2, *)
-+  private static func content(_ search: Search, message: String = "") throws -> LiveActivityAttributes.ContentState {
++  private static func content(_ search: Search, message: String = "") throws -> [String: Any] {
 +    let start = search.page * 3
 +    let end = min(start + 3, search.workspaces.count)
 +    var props: [String: Any] = ["searchId": search.id, "title": search.query.isEmpty ? "Search VD workspaces" : "\(start + (end > start ? 1 : 0))–\(end) of \(search.workspaces.count): \(String(search.query.prefix(32)))",
@@ -539,16 +830,12 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +      }, "searchAgain": try target(search, "again")]
 +    if start > 0 { props["previous"] = try target(search, "page", ["page": search.page - 1]) }
 +    if end < search.workspaces.count { props["next"] = try target(search, "page", ["page": search.page + 1]) }
-+    let data = try JSONSerialization.data(withJSONObject: props)
-+    let encodedContent = try JSONSerialization.data(withJSONObject: ["name": activityName, "props": String(decoding: data, as: UTF8.self)])
-+    // Leave headroom for ActivityKit/Expo attributes and JSON escaping (<4 KB total).
-+    guard encodedContent.count < 3400 else { throw SafeError(message: "Search results exceed the Lock Screen size budget. Try a more specific query.") }
-+    return LiveActivityAttributes.ContentState(name: activityName, props: String(decoding: data, as: UTF8.self))
++    return props
 +  }
 +  @MainActor @available(iOS 17.0, *)
 +  private static func publish(_ search: Search, message: String = "") async throws {
-+    guard try read(search.id).revision == search.revision, let activity = currentActivity(search) else { throw SafeError(message: "Search activity was dismissed. Start again from the app or a Live Activity action.") }
-+    await activity.update(ActivityContent(state: try content(search, message: message), staleDate: Date().addingTimeInterval(1800)))
++    guard try read(search.id).revision == search.revision, currentSearch(search) else { return }
++    try await HandyActivityCoordinator.publishSearch(id: search.id, props: content(search, message: message), ifCurrent: { (try? read(search.id).revision) == search.revision })
 +  }
 +
 +  private static func connection(_ id: String) throws -> (HandyBackgroundDelivery, [String: Any], URLSession) {
@@ -588,7 +875,8 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +      defer { session.invalidateAndCancel() }
 +      search.workspaces = try await workspaces(worker, profile, session).filter { $0.title.localizedCaseInsensitiveContains(search.query) || ($0.name ?? "").localizedCaseInsensitiveContains(search.query) }
 +      try Task.checkCancellation()
-+      guard try read(search.id).revision == search.revision, currentActivity(search) != nil else { return }
++      guard try read(search.id).revision == search.revision, try HandyActivityCoordinator.containsSearch(search.id) else { return }
++      guard currentSearch(search) else { throw SafeError(message: "The shared activity expired or was dismissed. Tap this notification to restore it in the app; your query is kept.") }
 +      try save(search)
 +      try await publish(search, message: search.workspaces.isEmpty ? "No matching active workspaces. Search again." : "")
 +    } catch {
@@ -604,34 +892,36 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +    guard try await workspaces(worker, profile, session).contains(where: { $0.id == workspace.id }) else { throw SafeError(message: "Workspace is no longer active. Search again.") }
 +    let encoded = workspace.id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
 +    let values = try await worker.request(session, profile, "/api/sessions?workspace_id=\(encoded)")
-+    let sessions = try JSONDecoder().decode([Session].self, from: JSONSerialization.data(withJSONObject: values))
-+      .filter { $0.workspace_id == workspace.id && validId($0.id) }
-+      .map { ($0, date($0.created_at)) }.filter { $0.1 != .distantPast }
++    let candidates = try JSONDecoder().decode([Session].self, from: JSONSerialization.data(withJSONObject: values)).filter { $0.workspace_id == workspace.id }
++    guard candidates.allSatisfy({ validId($0.id) && date($0.created_at) != .distantPast }) else { throw SafeError(message: "Cannot verify the newest session. Review the workspace in VD.") }
++    let sessions = candidates.map { ($0, date($0.created_at)) }
 +      .sorted { $0.1 == $1.1 ? $0.0.id < $1.0.id : $0.1 > $1.1 }.map { $0.0 }
 +    try Task.checkCancellation()
 +    guard let latest = sessions.first else { throw SafeError(message: "This workspace has no session. Create one in VD, then retry.") }
 +    guard let executor = latest.executor, !executor.isEmpty else { throw SafeError(message: "Newest session has no executor. Configure it in VD; no older session was selected.") }
 +    var current = try read(search.id)
-+    guard current.revision == search.revision, currentActivity(search) != nil else { return }
++    guard current.revision == search.revision, try HandyActivityCoordinator.containsSearch(search.id) else { return }
 +    let label = String((latest.name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? latest.name! : latest.created_at).prefix(80)) + " · " + executor
 +    let id = "workspace-message-\(search.id)-\(search.revision)"
 +    let payload: [String: Any] = ["type": "vd-agent", "originId": search.originId, "prefix": "", "session": ["id": latest.id, "workspaceId": workspace.id, "label": label, "executor": executor]]
 +    let rows: [[String: Any]] = [["id": id, "title": "\(workspace.title) · \(label)", "payload": payload]]
-+    let capture: [String: Any] = ["actionId": id, "presetId": search.presetId, "title": "\(workspace.title) · \(label)", "actions": String(decoding: try JSONSerialization.data(withJSONObject: rows), as: UTF8.self), "backgroundRequest": true]
++    guard let origin = profile["origin"] as? String, let base = URL(string: origin),
++          let browserURL = URL(string: "/workspaces/\(encoded)", relativeTo: base)?.absoluteURL else { throw SafeError(message: "The workspace browser destination is unavailable.") }
++    let capture: [String: Any] = ["actionId": id, "presetId": search.presetId, "title": "\(workspace.title) · \(label)", "actions": String(decoding: try JSONSerialization.data(withJSONObject: rows), as: UTF8.self), "backgroundRequest": true, "workspaceBrowserUrl": browserURL.absoluteString]
 +    _ = try await HandyNoteCapture.post(target: "handy-note-capture-v1:" + String(decoding: try JSONSerialization.data(withJSONObject: capture), as: UTF8.self))
 +    current = try read(search.id)
-+    guard current.revision == search.revision, currentActivity(search) != nil else { return }
++    guard current.revision == search.revision, try HandyActivityCoordinator.containsSearch(search.id) else { return }
 +    current.selected = workspace.id; current.selecting = false; try save(current)
-+    try await publish(current, message: "Message ready for \(String(label.prefix(50))). Expand its notification to write and send.")
++    try await HandyActivityCoordinator.completeSearch(search.id, ifCurrent: { (try? read(search.id).revision) == search.revision })
 +  }
 +
 +  @MainActor @available(iOS 17.0, *)
 +  private static func postQuery(_ search: Search, message: String = "", text: String = "") async throws {
-+    guard try read(search.id).revision == search.revision, currentActivity(search) != nil else { return }
++    guard try read(search.id).revision == search.revision, try HandyActivityCoordinator.containsSearch(search.id) else { return }
 +    let center = UNUserNotificationCenter.current()
 +    let reply = UNTextInputNotificationAction(identifier: submit, title: "Search workspaces", options: [], textInputButtonTitle: "Search", textInputPlaceholder: "Workspace name…")
 +    var categories = await center.notificationCategories()
-+    guard try read(search.id).revision == search.revision, currentActivity(search) != nil else { return }
++    guard try read(search.id).revision == search.revision, try HandyActivityCoordinator.containsSearch(search.id) else { return }
 +    categories = Set(categories.filter { $0.identifier != category })
 +    categories.insert(UNNotificationCategory(identifier: category, actions: [reply], intentIdentifiers: [], options: []))
 +    center.setNotificationCategories(categories)
@@ -648,7 +938,7 @@ index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b4
 +  }
 +}
 diff --git a/ios/Widgets/AppIntent.swift b/ios/Widgets/AppIntent.swift
-index 972fa4f190d5da8f961218bcbe2436964ac34acf..5717517e94c99def2671a0b3d17aac76e9bfee1e 100644
+index 972fa4f190d5da8f961218bcbe2436964ac34acf..2c9f82af878a248709366f4fd63250b55a73a97d 100644
 --- a/ios/Widgets/AppIntent.swift
 +++ b/ios/Widgets/AppIntent.swift
 @@ -1,5 +1,6 @@
@@ -672,7 +962,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..5717517e94c99def2671a0b3d17aac76
    func perform() async throws -> some IntentResult {
 +    // Handy Actions handles capture natively: no React runtime or foreground UI.
 +    // Other Expo button targets retain their original interaction behavior.
-+    if let target, target.hasPrefix("handy-workspace-search-v1:") {
++    if let target, target.hasPrefix("handy-workspace-search-v1:") || target.hasPrefix("handy-activity-v1:") {
 +      guard let handler = NSClassFromString("HandyWorkspaceSearch") as? HandyWorkspaceSearchIntentHandler.Type else {
 +        throw NSError(domain: "HandyWorkspaceSearch", code: 1, userInfo: [NSLocalizedDescriptionKey: "Open Handy Actions or install the updated native build."])
 +      }
@@ -690,7 +980,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..5717517e94c99def2671a0b3d17aac76
      WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
        "source": source as Any,
        "target": target as Any,
-@@ -128,3 +147,108 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+@@ -128,3 +147,110 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
      return .result()
    }
  }
@@ -712,6 +1002,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..5717517e94c99def2671a0b3d17aac76
 +    let actions: String
 +    let localSave: Bool?
 +    let backgroundRequest: Bool?
++    let workspaceBrowserUrl: String?
 +  }
 +
 +  static func post(target: String?) async throws -> Bool {
@@ -772,13 +1063,14 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..5717517e94c99def2671a0b3d17aac76
 +
 +    let submissionID = UUID().uuidString
 +    let notificationID = "handy-input-\(submissionID)"
-+    let body = "Expand and select Add Note to type, or tap this notification to open the editor."
++    let body = capture.workspaceBrowserUrl == nil ? "Expand and select Add Note to type, or tap this notification to open the editor." : "Expand and select Add Note to send a message. Tap this notification to open the workspace in your browser."
 +    var data: [String: String] = [
 +      "captureActionId": capture.actionId, "presetId": capture.presetId,
 +      "submissionId": submissionID, "actions": capture.actions
 +    ]
 +    if localSave { data["localNoteDestination"] = "1" }
 +    if backgroundRequest { data["backgroundRequest"] = "1" }
++    if let url = capture.workspaceBrowserUrl { data["workspaceBrowserUrl"] = url }
 +    let notification: [String: Any] = [
 +      "id": notificationID, "title": capture.title, "body": body, "data": data,
 +      "ios": ["categoryId": selectedCategory, "foregroundPresentationOptions": [
@@ -800,14 +1092,14 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..5717517e94c99def2671a0b3d17aac76
 +  }
 +}
 diff --git a/ios/Widgets/Buttons.swift b/ios/Widgets/Buttons.swift
-index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..3a5e67147fc6b6541af503c37e05e709a137432a 100644
+index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..a99bb834446a904b1e64e003816adadd1cc2eb81 100644
 --- a/ios/Widgets/Buttons.swift
 +++ b/ios/Widgets/Buttons.swift
 @@ -16,5 +16,12 @@ struct WidgetButtonView: ExpoSwiftUI.View {
 +  @ViewBuilder
    var body: some View {
 -    SwiftUI.Button(
-+    if props.target?.hasPrefix("handy-note-capture-v1:") == true || props.target?.hasPrefix("handy-workspace-search-v1:") == true {
++    if props.target?.hasPrefix("handy-note-capture-v1:") == true || props.target?.hasPrefix("handy-workspace-search-v1:") == true || props.target?.hasPrefix("handy-activity-v1:") == true {
 +      // LiveActivityIntent executes in the host app process, where notification
 +      // permission/categories belong. Do not schedule from the widget extension
 +      // or depend on React being alive. Other widget targets keep their intent.
@@ -825,13 +1117,18 @@ index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..3a5e67147fc6b6541af503c37e05e709
    }
  }
 diff --git a/ios/WidgetsModule.swift b/ios/WidgetsModule.swift
-index b1b4295e22726e6fe501aa5e514b56061dea57a1..9c901bbe659f34db3bd8bf7d02083c98cbd51276 100644
+index b1b4295e22726e6fe501aa5e514b56061dea57a1..bfe6039300b6dfe74f82b8640ffffff3c2a58655 100644
 --- a/ios/WidgetsModule.swift
 +++ b/ios/WidgetsModule.swift
-@@ -17,6 +17,27 @@ public final class WidgetsModule: Module {
+@@ -17,6 +17,32 @@ public final class WidgetsModule: Module {
  
      Events(onPushToStartTokenReceived, onTokenReceived, onUserInteraction)
  
++    AsyncFunction("syncHandyActivity") { (configuration: String, renew: Bool) async throws -> String in
++      guard #available(iOS 16.2, *) else { throw LiveActivitiesNotSupportedException() }
++      return try await HandyActivityCoordinator.sync(configuration, renew: renew)
++    }
++
 +    AsyncFunction("beginHandyWorkspaceSearch") { (action: String, presetId: String, query: String?) async throws -> String in
 +      guard #available(iOS 17.0, *) else { throw LiveActivitiesNotSupportedException() }
 +      return try await HandyWorkspaceSearch.begin(action: action, presetId: presetId, query: query)
