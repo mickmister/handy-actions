@@ -12,6 +12,7 @@ export function ActionIcon({ payload, size = 22, color = '#334155' }: {
   // Labels remain visible; the icon is decorative and should not be read twice.
   if (site) return <FontAwesome6 name={site} brand size={size} color={color} accessible={false} />;
   const fallback = payload.type === 'notes' ? 'note-sticky'
+    : payload.type === 'vd-workspace-search' ? 'magnifying-glass'
     : payload.type === 'qr' ? 'qrcode'
     : payload.type === 'vd-agent' ? 'robot'
     : payload.type === 'text-input' ? 'pen-to-square'

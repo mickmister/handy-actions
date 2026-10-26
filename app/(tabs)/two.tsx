@@ -44,7 +44,7 @@ export default function ActionsScreen() {
 
   async function addAction() {
     if (!selectedPreset) return;
-    const payload = type==='http'||type==='vd-agent' ? remote : makePayload(type, value);
+    const payload = type==='http'||type==='vd-agent'||type==='vd-workspace-search' ? remote : makePayload(type, value);
     const result = editingId
       ? await handy.updateAction(selectedPreset.id, editingId, name, payload)
       : await handy.addAction(selectedPreset.id, name, payload);
@@ -91,7 +91,7 @@ export default function ActionsScreen() {
             <Text style={styles.cardTitle}>{editingId ? 'Edit action' : 'Add action'}</Text>
             <TextInput value={name} onChangeText={setName} placeholder="My LinkedIn" placeholderTextColor="#8792a2" style={styles.input} />
             <View style={styles.chips}>
-              {(['notes', 'qr', 'web', 'deeplink', 'text-input','http','vd-agent'] as const).map((payloadType) => (
+              {(['notes', 'qr', 'web', 'deeplink', 'text-input','http','vd-agent','vd-workspace-search'] as const).map((payloadType) => (
                 <Pressable
                   key={payloadType}
                   style={type === payloadType ? styles.selectedChip : styles.chip}
@@ -100,17 +100,18 @@ export default function ActionsScreen() {
                     if (payloadType === 'notes' && !name.trim()) setName('Go to notes');
                     if(payloadType==='http')setRemote({type:'http',originId:'',path:'/',method:'POST',bodyFormat:'json',body:'{"text":"{text}"}',captureText:true});
                     if(payloadType==='vd-agent')setRemote({type:'vd-agent',originId:'',prefix:''});
+                    if(payloadType==='vd-workspace-search') { setRemote({type:'vd-workspace-search',originId:''}); if(!name.trim())setName('Search VD workspaces'); }
                     if (payloadType === 'text-input' && !value) {
                       setValue(`${ExpoLinking.createURL('/notes')}?text={text}`);
                       if (!name) setName('Add Note');
                     }
                   }}>
-                  <Text style={type === payloadType ? styles.selectedChipText : styles.chipText}>{payloadType === 'notes' ? 'Go to notes' : payloadType}</Text>
+                  <Text style={type === payloadType ? styles.selectedChipText : styles.chipText}>{payloadType === 'notes' ? 'Go to notes' : payloadType === 'vd-workspace-search' ? 'VD workspace search' : payloadType}</Text>
                 </Pressable>
               ))}
             </View>
             {type === 'notes' ? <Text style={styles.copy}>Opens this app’s notes inbox. No URL or text input is needed.</Text> : null}
-            {type!=='http'&&type!=='vd-agent'&&type!=='notes'?<TextInput
+            {type!=='http'&&type!=='vd-agent'&&type!=='vd-workspace-search'&&type!=='notes'?<TextInput
               value={value}
               onChangeText={setValue}
               autoCapitalize="none"
@@ -125,7 +126,7 @@ export default function ActionsScreen() {
                 <Text style={styles.secondaryButtonText}>Use this app as destination</Text>
               </Pressable>
             </> : null}
-            {(type==='http'||type==='vd-agent')&&(remote.type==='http'||remote.type==='vd-agent')?<RemoteActionEditor value={remote} onChange={setRemote} />:null}
+            {(type==='http'||type==='vd-agent'||type==='vd-workspace-search')&&(remote.type==='http'||remote.type==='vd-agent'||remote.type==='vd-workspace-search')?<RemoteActionEditor value={remote} onChange={setRemote} />:null}
             <Pressable disabled={reordering} style={styles.primaryButton} onPress={()=>void addAction().catch(()=>Alert.alert('Action','Could not save this action.'))}>
               <Text style={styles.primaryButtonText}>{editingId ? 'Save action' : 'Add action'}</Text>
             </Pressable>
@@ -172,7 +173,7 @@ export default function ActionsScreen() {
                   </Link>
                 ) : isInputPayload(action.payload) || action.payload.type==='http' ? (
                   <Link href={{ pathname: '/capture', params: { actionId: action.id, presetId: selectedPreset.id } }} asChild>
-                    <Pressable style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>{action.payload.type==='vd-agent'?'Write prompt':action.payload.type==='http'?'Run request':'Add Note'}</Text></Pressable>
+                    <Pressable style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>{action.payload.type==='vd-workspace-search'?'Search workspaces':action.payload.type==='vd-agent'?'Write prompt':action.payload.type==='http'?'Run request':'Add Note'}</Text></Pressable>
                   </Link>
                 ) : (
                   <Pressable style={styles.secondaryButton} onPress={() => void runActionPayload(action.payload).catch(()=>Alert.alert('Could not open destination','The configured destination could not be opened.'))}>
@@ -181,7 +182,7 @@ export default function ActionsScreen() {
                 )}
                 <Pressable onPress={() => {
                   setEditingId(action.id); setName(action.name); setType(action.payload.type);
-                  if(action.payload.type==='http'||action.payload.type==='vd-agent')setRemote(action.payload);
+                  if(action.payload.type==='http'||action.payload.type==='vd-agent'||action.payload.type==='vd-workspace-search')setRemote(action.payload);
                   else setValue(action.payload.type === 'notes' ? '' : action.payload.type === 'qr' ? action.payload.value : action.payload.type === 'text-input' ? action.payload.urlTemplate : action.payload.url);
                 }}><Text style={styles.chipText}>Edit</Text></Pressable>
                 <Pressable disabled={reordering} onPress={() => selectedPreset && void handy.deleteAction(selectedPreset.id, action.id)}>

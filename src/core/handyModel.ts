@@ -24,13 +24,14 @@ export type HttpActionPayload = {
 };
 export type AgentSession = { id: string; workspaceId: string; label: string; executor: string };
 export type AgentActionPayload = { type: 'vd-agent'; originId: string; prefix: string; session?: AgentSession };
+export type WorkspaceSearchActionPayload = { type: 'vd-workspace-search'; originId: string };
 
 export type NotesActionPayload = { type: 'notes' };
 
-export type HandyActionPayload = QrActionPayload | WebActionPayload | DeepLinkActionPayload | TextInputActionPayload | HttpActionPayload | AgentActionPayload | NotesActionPayload;
+export type HandyActionPayload = QrActionPayload | WebActionPayload | DeepLinkActionPayload | TextInputActionPayload | HttpActionPayload | AgentActionPayload | WorkspaceSearchActionPayload | NotesActionPayload;
 
 export function isInputPayload(payload: HandyActionPayload): boolean {
-  return payload.type === 'text-input' || payload.type === 'vd-agent' || (payload.type === 'http' && payload.captureText);
+  return payload.type === 'text-input' || payload.type === 'vd-agent' || payload.type === 'vd-workspace-search' || (payload.type === 'http' && payload.captureText);
 }
 
 export type SurfaceSettings = {
@@ -72,7 +73,7 @@ export type NotificationActionRow = {
   payload: HandyActionPayload;
 };
 
-export type LiveActivityActionLink = { title: string; url: string; captureTarget?: string; siteGlyph?: string; systemImage?: 'note.text' };
+export type LiveActivityActionLink = { title: string; url: string; captureTarget?: string; siteGlyph?: string; systemImage?: 'note.text' | 'magnifyingglass' };
 
 export type HandyActionsLiveActivityProps = {
   presetId: string;
@@ -350,6 +351,7 @@ function validatePayload(payload: unknown, path: string): string[] {
     if (typeof payload.captureText !== 'boolean') errors.push(`${path}.captureText must be boolean.`);
     return errors;
   }
+  if (payload.type === 'vd-workspace-search') return isNonEmptyString(payload.originId) ? [] : [`${path}.originId is required.`];
   if (payload.type === 'vd-agent') {
     const errors = isNonEmptyString(payload.originId) && typeof payload.prefix === 'string' ? [] : [`${path}: origin and prefix are required.`];
     if (payload.session !== undefined && (!isRecord(payload.session) || !['id','workspaceId','label','executor'].every(k => isNonEmptyString((payload.session as Record<string,unknown>)[k])))) errors.push(`${path}.session must be a complete selected session.`);
@@ -381,6 +383,7 @@ function normalizePayload(payload: unknown): HandyActionPayload {
   }
   if (payload.type === 'http') return { type: 'http', originId: String(payload.originId ?? ''), path: String(payload.path ?? ''), method: payload.method as HttpActionPayload['method'], bodyFormat: payload.bodyFormat as HttpActionPayload['bodyFormat'], body: String(payload.body ?? ''), captureText: payload.captureText === true };
   if (payload.type === 'vd-agent') return { type: 'vd-agent', originId: String(payload.originId ?? ''), prefix: typeof payload.prefix === 'string' ? payload.prefix : '', ...(isRecord(payload.session) ? { session: { id: String(payload.session.id ?? ''), workspaceId: String(payload.session.workspaceId ?? ''), label: String(payload.session.label ?? ''), executor: String(payload.session.executor ?? '') } } : {}) };
+  if (payload.type === 'vd-workspace-search') return { type: 'vd-workspace-search', originId: String(payload.originId ?? '') };
   if (payload.type === 'qr' && typeof payload.value === 'string') return { type: 'qr', value: payload.value };
   return { type: 'qr', value: '' };
 }

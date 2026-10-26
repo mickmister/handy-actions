@@ -1,9 +1,9 @@
 diff --git a/ios/HandyBackgroundDelivery.swift b/ios/HandyBackgroundDelivery.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..4df9238887be31656c9a6df22d2be97cf6b60110
+index 0000000000000000000000000000000000000000..e66c66db53272cd3f5fcf7c3a10ebf9085de36d0
 --- /dev/null
 +++ b/ios/HandyBackgroundDelivery.swift
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,253 @@
 +import Foundation
 +import Security
 +import CryptoKit
@@ -71,6 +71,7 @@ index 0000000000000000000000000000000000000000..4df9238887be31656c9a6df22d2be97c
 +
 +  @objc(handleResponse:notification:completion:)
 +  static func handle(response: UNNotificationResponse, notification: [String: Any], completion: @escaping () -> Void) -> Bool {
++    if HandyWorkspaceSearch.handle(response: response, notification: notification, completion: completion) { return true }
 +    guard let data = notification["data"] as? [String: Any] else { return false }
 +    let press = response.actionIdentifier
 +    let actionId: String
@@ -156,7 +157,7 @@ index 0000000000000000000000000000000000000000..4df9238887be31656c9a6df22d2be97c
 +    }
 +  }
 +
-+  private func profile(_ id: String) throws -> [String: Any] {
++  func profile(_ id: String) throws -> [String: Any] {
 +    let key = Data("handy-origin-\(id)".utf8)
 +    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
 +      kSecAttrService as String: "handy-actions-origins-v1:no-auth", kSecAttrAccount as String: key,
@@ -170,7 +171,7 @@ index 0000000000000000000000000000000000000000..4df9238887be31656c9a6df22d2be97c
 +    return result
 +  }
 +
-+  private func request(_ session: URLSession, _ profile: [String: Any], _ path: String,
++  func request(_ session: URLSession, _ profile: [String: Any], _ path: String,
 +    _ method: String = "GET", _ body: Data? = nil, _ contentType: String? = nil, _ json: Bool = true) async throws -> Any {
 +    guard let origin = profile["origin"] as? String, let base = URL(string: origin),
 +      ["https", "http"].contains(base.scheme?.lowercased() ?? ""), base.user == nil, base.password == nil,
@@ -301,8 +302,353 @@ index 0000000000000000000000000000000000000000..b672a0c4cf60367976f03e0ca7bcde44
 +    }
 +  }
 +}
+diff --git a/ios/HandyWorkspaceSearch.swift b/ios/HandyWorkspaceSearch.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..c3dd2b2db9c6ce15a553165edd2105b40d8b61de
+--- /dev/null
++++ b/ios/HandyWorkspaceSearch.swift
+@@ -0,0 +1,339 @@
++import ActivityKit
++import Foundation
++import UIKit
++import UserNotifications
++
++// Host-app only. The widget's LiveActivityIntent calls this through an ObjC
++// runtime bridge; no network, credentials or Activity.request run in the extension.
++@objc(HandyWorkspaceSearch)
++final class HandyWorkspaceSearch: NSObject, HandyWorkspaceSearchIntentHandler {
++  private static let prefix = "handy-workspace-search-v1:"
++  private static let activityName = "WorkspaceSearchActivity"
++  private static let category = "handy-workspace-search-input-v1"
++  private static let submit = "handy-workspace-search-submit"
++  private struct SafeError: LocalizedError {
++    let message: String
++    var errorDescription: String? { message }
++  }
++  private struct Workspace: Codable {
++    let id: String
++    let name: String?
++    let updated_at: String?
++    let archived: Bool?
++    let worktree_deleted: Bool?
++    var title: String { String((name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? name! : id).prefix(60)) }
++  }
++  private struct Session: Decodable {
++    let id: String
++    let workspace_id: String
++    let name: String?
++    let executor: String?
++    let created_at: String
++  }
++  private struct Search: Codable {
++    var id: String
++    var revision: String
++    let originId: String
++    let presetId: String
++    let action: String
++    var query = ""
++    var workspaces: [Workspace] = []
++    var page = 0
++    var selecting = false
++    var selected: String?
++  }
++
++  private static func safeMessage(_ error: Error) -> String {
++    (error as? SafeError)?.message ?? "Could not complete workspace search. Check the connection and try again."
++  }
++
++  // End exactly once on completion OR expiration. Cancellation propagates to
++  // URLSession.data(for:); unfinished read-only searches remain retryable.
++  @MainActor
++  private static func withRuntime<T>(_ operation: @escaping @MainActor () async throws -> T) async throws -> T {
++    var identifier = UIBackgroundTaskIdentifier.invalid
++    let task = Task { try Task.checkCancellation(); return try await operation() }
++    @MainActor func finish() {
++      if identifier != .invalid {
++        UIApplication.shared.endBackgroundTask(identifier)
++        identifier = .invalid
++      }
++    }
++    identifier = UIApplication.shared.beginBackgroundTask(withName: "Handy workspace search") {
++      Task { @MainActor in task.cancel(); finish() }
++    }
++    defer { finish() }
++    return try await task.value
++  }
++
++  @objc(handleTarget:completion:)
++  static func handleTarget(_ target: String, completion: @escaping (String?) -> Void) {
++    Task { @MainActor in
++      guard #available(iOS 17.0, *) else { completion("Requires iOS 17 or later."); return }
++      do { try await withRuntime { try await perform(target) }; completion(nil) }
++      catch { completion(safeMessage(error)) }
++    }
++  }
++
++  static func handle(response: UNNotificationResponse, notification: [String: Any], completion: @escaping () -> Void) -> Bool {
++    guard response.actionIdentifier == submit,
++          let response = response as? UNTextInputNotificationResponse,
++          let data = notification["data"] as? [String: Any],
++          let id = data["searchId"] as? String, let revision = data["revision"] as? String else { return false }
++    Task { @MainActor in
++      guard #available(iOS 17.0, *) else { completion(); return }
++      do {
++        try await withRuntime {
++          var search = try read(id)
++          guard search.revision == revision, currentActivity(search) != nil else { return } // duplicate/stale callback
++          search.revision = UUID().uuidString
++          search.query = String(response.userText.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
++          search.workspaces = []; search.page = 0; search.selected = nil; search.selecting = false
++          try save(search)
++          guard response.userText.trimmingCharacters(in: .whitespacesAndNewlines).count <= 80 else { throw SafeError(message: "Use at most 80 characters for a workspace-name search.") }
++          try await query(search)
++          if !search.query.isEmpty, try read(id).revision == search.revision, currentActivity(search) != nil {
++            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [response.notification.request.identifier])
++          }
++        }
++      } catch {
++        if let search = try? read(id) {
++          try? await postQuery(search, message: safeMessage(error), text: response.userText)
++        }
++      }
++      completion()
++    }
++    return true
++  }
++
++  @MainActor @available(iOS 17.0, *)
++  static func begin(action: String, presetId: String, query text: String?) async throws -> String {
++    try await withRuntime { try await beginSearch(action: action, presetId: presetId, query: text) }
++  }
++
++  @MainActor @available(iOS 17.0, *)
++  private static func beginSearch(action: String, presetId: String, query text: String?) async throws -> String {
++    if let text, text.trimmingCharacters(in: .whitespacesAndNewlines).count > 80 { throw SafeError(message: "Use at most 80 characters for a workspace-name search.") }
++    guard let row = try JSONSerialization.jsonObject(with: Data(action.utf8)) as? [String: Any],
++          let actionId = row["id"] as? String, !actionId.isEmpty,
++          let payload = row["payload"] as? [String: Any], payload["type"] as? String == "vd-workspace-search",
++          let originId = payload["originId"] as? String, !originId.isEmpty else {
++      throw SafeError(message: "Choose a saved VD origin for this search action.")
++    }
++    let settings = await UNUserNotificationCenter.current().notificationSettings()
++    try Task.checkCancellation()
++    guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
++      throw SafeError(message: "Allow notifications in Settings to search from the Lock Screen.")
++    }
++    guard ActivityAuthorizationInfo().areActivitiesEnabled else { throw SafeError(message: "Allow Live Activities for Handy Actions in iOS Settings.") }
++    // Keep searches on disk for cold-start intents, without persisting credentials.
++    let folder = try directory()
++    for file in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]) {
++      if let date = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
++         date < Date().addingTimeInterval(-86400) { try? FileManager.default.removeItem(at: file) }
++    }
++    var search = Search(id: UUID().uuidString, revision: UUID().uuidString, originId: originId, presetId: presetId, action: action)
++    if let text { search.query = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)) }
++    try save(search)
++    let state = try content(search, message: text == nil ? "Enter a workspace name in the search notification." : "Searching…")
++    // Admission happens ONLY here, from foreground or an eligible LiveActivityIntent,
++    // before the user submits notification input. The reply only updates this activity.
++    let instances = activities()
++    if let existing = instances.first {
++      await existing.update(ActivityContent(state: state, staleDate: Date().addingTimeInterval(1800)))
++      for duplicate in instances.dropFirst() { await duplicate.end(nil, dismissalPolicy: .immediate) }
++    } else {
++      do {
++        _ = try Activity.request(attributes: LiveActivityAttributes(url: nil), content: ActivityContent(state: state, staleDate: Date().addingTimeInterval(1800)), pushType: nil)
++      } catch { throw SafeError(message: "iOS could not start search results. Dismiss an unused Live Activity and retry from the app.") }
++    }
++    guard currentActivity(search) != nil else { throw SafeError(message: "A newer search replaced this one. Use the current search activity.") }
++    if text != nil { try await query(search); return "Choose a workspace in the search-results Live Activity." }
++    try await postQuery(search)
++    return "Search notification posted. Expand it and choose Search workspaces."
++  }
++
++  @MainActor @available(iOS 17.0, *)
++  private static func perform(_ target: String) async throws {
++    guard target.hasPrefix(prefix),
++          let value = try JSONSerialization.jsonObject(with: Data(target.dropFirst(prefix.count).utf8)) as? [String: Any],
++          let operation = value["operation"] as? String else { throw SafeError(message: "Refresh this search action in Handy Actions.") }
++    if operation == "begin", let action = value["action"], let preset = value["presetId"] as? String {
++      let encoded = try JSONSerialization.data(withJSONObject: action)
++      _ = try await beginSearch(action: String(decoding: encoded, as: UTF8.self), presetId: preset, query: nil)
++      return
++    }
++    guard let id = value["searchId"] as? String, let revision = value["revision"] as? String else { throw SafeError(message: "Start a new workspace search.") }
++    var search = try read(id)
++    guard search.revision == revision, currentActivity(search) != nil else { throw SafeError(message: "These results are no longer current. Start a new search.") }
++    if operation == "again" {
++      search.revision = UUID().uuidString; search.workspaces = []; search.query = ""; search.page = 0; search.selected = nil; search.selecting = false
++      try save(search)
++      try await publish(search, message: "Enter a workspace name in the search notification.")
++      try await postQuery(search)
++    } else if operation == "page", let page = value["page"] as? Int {
++      search.page = max(0, min(page, max(0, (search.workspaces.count - 1) / 3)))
++      try save(search); try await publish(search)
++    } else if operation == "select", let index = value["index"] as? Int, search.workspaces.indices.contains(index) {
++      if search.selected != nil { try await publish(search, message: "Expand the message notification to send, or search again."); return }
++      guard !search.selecting else { return }
++      search.selecting = true; try save(search)
++      do { try await select(search, workspace: search.workspaces[index]) }
++      catch {
++        var latest = try read(id)
++        if latest.revision == revision {
++          latest.selecting = false; try save(latest)
++          try? await publish(latest, message: safeMessage(error))
++        }
++        throw error
++      }
++    }
++  }
++
++  private static func directory() throws -> URL {
++    let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("HandyWorkspaceSearch", isDirectory: true)
++    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
++    return directory
++  }
++  private static func file(_ id: String) throws -> URL {
++    guard UUID(uuidString: id) != nil else { throw SafeError(message: "Start a new workspace search.") }
++    return try directory().appendingPathComponent(id + ".json")
++  }
++  private static func read(_ id: String) throws -> Search { try JSONDecoder().decode(Search.self, from: Data(contentsOf: file(id))) }
++  private static func save(_ search: Search) throws {
++    try JSONEncoder().encode(search).write(to: file(search.id), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
++  }
++  @available(iOS 16.2, *)
++  private static func activities() -> [Activity<LiveActivityAttributes>] {
++    Activity<LiveActivityAttributes>.activities.filter { $0.content.state.name == activityName && ($0.activityState == .active || $0.activityState == .stale) }
++  }
++  @available(iOS 16.2, *)
++  private static func currentActivity(_ search: Search) -> Activity<LiveActivityAttributes>? {
++    activities().first { activity in
++      guard let props = try? JSONSerialization.jsonObject(with: Data(activity.content.state.props.utf8)) as? [String: Any] else { return false }
++      return props["searchId"] as? String == search.id
++    }
++  }
++  private static func target(_ search: Search, _ operation: String, _ extra: [String: Any] = [:]) throws -> String {
++    var value: [String: Any] = ["operation": operation, "searchId": search.id, "revision": search.revision]
++    extra.forEach { value[$0.key] = $0.value }
++    return prefix + String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
++  }
++  @available(iOS 16.2, *)
++  private static func content(_ search: Search, message: String = "") throws -> LiveActivityAttributes.ContentState {
++    let start = search.page * 3
++    let end = min(start + 3, search.workspaces.count)
++    var props: [String: Any] = ["searchId": search.id, "title": search.query.isEmpty ? "Search VD workspaces" : "\(start + (end > start ? 1 : 0))–\(end) of \(search.workspaces.count): \(String(search.query.prefix(32)))",
++      "message": String(message.prefix(120)), "results": try (start..<max(start, end)).map { index in
++        ["title": search.workspaces[index].title, "target": try target(search, "select", ["index": index])]
++      }, "searchAgain": try target(search, "again")]
++    if start > 0 { props["previous"] = try target(search, "page", ["page": search.page - 1]) }
++    if end < search.workspaces.count { props["next"] = try target(search, "page", ["page": search.page + 1]) }
++    let data = try JSONSerialization.data(withJSONObject: props)
++    let encodedContent = try JSONSerialization.data(withJSONObject: ["name": activityName, "props": String(decoding: data, as: UTF8.self)])
++    // Leave headroom for ActivityKit/Expo attributes and JSON escaping (<4 KB total).
++    guard encodedContent.count < 3400 else { throw SafeError(message: "Search results exceed the Lock Screen size budget. Try a more specific query.") }
++    return LiveActivityAttributes.ContentState(name: activityName, props: String(decoding: data, as: UTF8.self))
++  }
++  @MainActor @available(iOS 17.0, *)
++  private static func publish(_ search: Search, message: String = "") async throws {
++    guard try read(search.id).revision == search.revision, let activity = currentActivity(search) else { throw SafeError(message: "Search activity was dismissed. Start again from the app or a Live Activity action.") }
++    await activity.update(ActivityContent(state: try content(search, message: message), staleDate: Date().addingTimeInterval(1800)))
++  }
++
++  private static func connection(_ id: String) throws -> (HandyBackgroundDelivery, [String: Any], URLSession) {
++    let worker = HandyBackgroundDelivery()
++    let profile = try worker.profile(id)
++    let configuration = URLSessionConfiguration.ephemeral
++    configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil; configuration.urlCache = nil
++    configuration.timeoutIntervalForResource = 20
++    return (worker, profile, URLSession(configuration: configuration, delegate: worker, delegateQueue: nil))
++  }
++  private static func validId(_ id: String) -> Bool { !id.isEmpty && id != "." && id != ".." && id.utf8.count <= 512 }
++  private static func date(_ text: String?) -> Date {
++    let formatter = ISO8601DateFormatter()
++    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
++    if let text, let value = formatter.date(from: text) { return value }
++    formatter.formatOptions = [.withInternetDateTime]
++    return text.flatMap { formatter.date(from: $0) } ?? .distantPast
++  }
++  private static func workspaces(_ worker: HandyBackgroundDelivery, _ profile: [String: Any], _ session: URLSession) async throws -> [Workspace] {
++    let result = try await worker.request(session, profile, "/api/workspaces")
++    let values = try JSONDecoder().decode([Workspace].self, from: JSONSerialization.data(withJSONObject: result))
++    var seen = Set<String>()
++    return values.filter { validId($0.id) && $0.archived != true && $0.worktree_deleted != true && seen.insert($0.id).inserted }
++      .map { ($0, date($0.updated_at)) }
++      .sorted { $0.1 == $1.1 ? $0.0.id < $1.0.id : $0.1 > $1.1 }.map { $0.0 }
++  }
++  @MainActor @available(iOS 17.0, *)
++  private static func query(_ initial: Search) async throws {
++    var search = initial
++    guard !search.query.isEmpty else {
++      try await publish(search, message: "Enter a workspace name; empty searches are not sent.")
++      try await postQuery(search); return
++    }
++    try await publish(search, message: "Searching…")
++    do {
++      let (worker, profile, session) = try connection(search.originId)
++      defer { session.invalidateAndCancel() }
++      search.workspaces = try await workspaces(worker, profile, session).filter { $0.title.localizedCaseInsensitiveContains(search.query) || ($0.name ?? "").localizedCaseInsensitiveContains(search.query) }
++      try Task.checkCancellation()
++      guard try read(search.id).revision == search.revision, currentActivity(search) != nil else { return }
++      try save(search)
++      try await publish(search, message: search.workspaces.isEmpty ? "No matching active workspaces. Search again." : "")
++    } catch {
++      try? await publish(search, message: safeMessage(error))
++      throw error
++    }
++  }
++  @MainActor @available(iOS 17.0, *)
++  private static func select(_ search: Search, workspace: Workspace) async throws {
++    try await publish(search, message: "Finding newest session…")
++    let (worker, profile, session) = try connection(search.originId)
++    defer { session.invalidateAndCancel() }
++    guard try await workspaces(worker, profile, session).contains(where: { $0.id == workspace.id }) else { throw SafeError(message: "Workspace is no longer active. Search again.") }
++    let encoded = workspace.id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
++    let values = try await worker.request(session, profile, "/api/sessions?workspace_id=\(encoded)")
++    let sessions = try JSONDecoder().decode([Session].self, from: JSONSerialization.data(withJSONObject: values))
++      .filter { $0.workspace_id == workspace.id && validId($0.id) }
++      .map { ($0, date($0.created_at)) }.filter { $0.1 != .distantPast }
++      .sorted { $0.1 == $1.1 ? $0.0.id < $1.0.id : $0.1 > $1.1 }.map { $0.0 }
++    try Task.checkCancellation()
++    guard let latest = sessions.first else { throw SafeError(message: "This workspace has no session. Create one in VD, then retry.") }
++    guard let executor = latest.executor, !executor.isEmpty else { throw SafeError(message: "Newest session has no executor. Configure it in VD; no older session was selected.") }
++    var current = try read(search.id)
++    guard current.revision == search.revision, currentActivity(search) != nil else { return }
++    let label = String((latest.name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? latest.name! : latest.created_at).prefix(80)) + " · " + executor
++    let id = "workspace-message-\(search.id)-\(search.revision)"
++    let payload: [String: Any] = ["type": "vd-agent", "originId": search.originId, "prefix": "", "session": ["id": latest.id, "workspaceId": workspace.id, "label": label, "executor": executor]]
++    let rows: [[String: Any]] = [["id": id, "title": "\(workspace.title) · \(label)", "payload": payload]]
++    let capture: [String: Any] = ["actionId": id, "presetId": search.presetId, "title": "\(workspace.title) · \(label)", "actions": String(decoding: try JSONSerialization.data(withJSONObject: rows), as: UTF8.self), "backgroundRequest": true]
++    _ = try await HandyNoteCapture.post(target: "handy-note-capture-v1:" + String(decoding: try JSONSerialization.data(withJSONObject: capture), as: UTF8.self))
++    current = try read(search.id)
++    guard current.revision == search.revision, currentActivity(search) != nil else { return }
++    current.selected = workspace.id; current.selecting = false; try save(current)
++    try await publish(current, message: "Message ready for \(String(label.prefix(50))). Expand its notification to write and send.")
++  }
++
++  @MainActor @available(iOS 17.0, *)
++  private static func postQuery(_ search: Search, message: String = "", text: String = "") async throws {
++    guard try read(search.id).revision == search.revision, currentActivity(search) != nil else { return }
++    let center = UNUserNotificationCenter.current()
++    let reply = UNTextInputNotificationAction(identifier: submit, title: "Search workspaces", options: [], textInputButtonTitle: "Search", textInputPlaceholder: "Workspace name…")
++    var categories = await center.notificationCategories()
++    guard try read(search.id).revision == search.revision, currentActivity(search) != nil else { return }
++    categories = Set(categories.filter { $0.identifier != category })
++    categories.insert(UNNotificationCategory(identifier: category, actions: [reply], intentIdentifiers: [], options: []))
++    center.setNotificationCategories(categories)
++    let row = try JSONSerialization.jsonObject(with: Data(search.action.utf8)) as? [String: Any] ?? [:]
++    let actions: [[String: Any]] = [["id": row["id"] ?? "search", "title": row["name"] ?? "Search workspaces", "payload": row["payload"] ?? [:]]]
++    let data = ["searchId": search.id, "revision": search.revision, "captureActionId": row["id"] as? String ?? "search", "presetId": search.presetId, "editorText": text,
++      "actions": String(decoding: try JSONSerialization.data(withJSONObject: actions), as: UTF8.self)]
++    let content = UNMutableNotificationContent()
++    content.title = "Search VD workspaces"
++    content.body = message.isEmpty ? "Expand and choose Search workspaces. Results appear in the search Live Activity." : message
++    content.categoryIdentifier = category
++    content.userInfo = ["__notifee_notification": ["id": "handy-workspace-search-query", "title": content.title, "body": content.body, "data": data, "ios": ["categoryId": category]]]
++    try await center.add(UNNotificationRequest(identifier: "handy-workspace-search-query", content: content, trigger: nil))
++  }
++}
 diff --git a/ios/Widgets/AppIntent.swift b/ios/Widgets/AppIntent.swift
-index 972fa4f190d5da8f961218bcbe2436964ac34acf..413b4330d20bdf0f512900d7051599209cbe32cf 100644
+index 972fa4f190d5da8f961218bcbe2436964ac34acf..5717517e94c99def2671a0b3d17aac76e9bfee1e 100644
 --- a/ios/Widgets/AppIntent.swift
 +++ b/ios/Widgets/AppIntent.swift
 @@ -1,5 +1,6 @@
@@ -320,24 +666,41 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..413b4330d20bdf0f512900d705159920
  
    @Parameter(title: "source")
    var source: String?
-@@ -119,6 +121,11 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+@@ -119,6 +121,23 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
    }
  
    func perform() async throws -> some IntentResult {
 +    // Handy Actions handles capture natively: no React runtime or foreground UI.
 +    // Other Expo button targets retain their original interaction behavior.
++    if let target, target.hasPrefix("handy-workspace-search-v1:") {
++      guard let handler = NSClassFromString("HandyWorkspaceSearch") as? HandyWorkspaceSearchIntentHandler.Type else {
++        throw NSError(domain: "HandyWorkspaceSearch", code: 1, userInfo: [NSLocalizedDescriptionKey: "Open Handy Actions or install the updated native build."])
++      }
++      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
++        handler.handleTarget(target) { message in
++          if let message { continuation.resume(throwing: NSError(domain: "HandyWorkspaceSearch", code: 2, userInfo: [NSLocalizedDescriptionKey: message])) }
++          else { continuation.resume() }
++        }
++      }
++      return .result()
++    }
 +    if try await HandyNoteCapture.post(target: target) {
 +      return .result()
 +    }
      WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
        "source": source as Any,
        "target": target as Any,
-@@ -128,3 +135,103 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+@@ -128,3 +147,108 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
      return .result()
    }
  }
 +
-+private enum HandyNoteCapture {
++@objc(HandyWorkspaceSearchIntentHandler) protocol HandyWorkspaceSearchIntentHandler {
++  @objc(handleTarget:completion:)
++  static func handleTarget(_ target: String, completion: @escaping (String?) -> Void)
++}
++
++enum HandyNoteCapture {
 +  private static let prefix = "handy-note-capture-v1:"
 +  private static let categoryID = "handy-text-input"
 +
@@ -437,14 +800,14 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..413b4330d20bdf0f512900d705159920
 +  }
 +}
 diff --git a/ios/Widgets/Buttons.swift b/ios/Widgets/Buttons.swift
-index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..8a0d4265be0b719238ced23669872c431ae000e2 100644
+index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..3a5e67147fc6b6541af503c37e05e709a137432a 100644
 --- a/ios/Widgets/Buttons.swift
 +++ b/ios/Widgets/Buttons.swift
 @@ -16,5 +16,12 @@ struct WidgetButtonView: ExpoSwiftUI.View {
 +  @ViewBuilder
    var body: some View {
 -    SwiftUI.Button(
-+    if props.target?.hasPrefix("handy-note-capture-v1:") == true {
++    if props.target?.hasPrefix("handy-note-capture-v1:") == true || props.target?.hasPrefix("handy-workspace-search-v1:") == true {
 +      // LiveActivityIntent executes in the host app process, where notification
 +      // permission/categories belong. Do not schedule from the widget extension
 +      // or depend on React being alive. Other widget targets keep their intent.
@@ -462,13 +825,18 @@ index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..8a0d4265be0b719238ced23669872c43
    }
  }
 diff --git a/ios/WidgetsModule.swift b/ios/WidgetsModule.swift
-index b1b4295e22726e6fe501aa5e514b56061dea57a1..d4bc4bb382e310d8803634b737a517e70a7e4e2b 100644
+index b1b4295e22726e6fe501aa5e514b56061dea57a1..9c901bbe659f34db3bd8bf7d02083c98cbd51276 100644
 --- a/ios/WidgetsModule.swift
 +++ b/ios/WidgetsModule.swift
-@@ -17,6 +17,22 @@ public final class WidgetsModule: Module {
+@@ -17,6 +17,27 @@ public final class WidgetsModule: Module {
  
      Events(onPushToStartTokenReceived, onTokenReceived, onUserInteraction)
  
++    AsyncFunction("beginHandyWorkspaceSearch") { (action: String, presetId: String, query: String?) async throws -> String in
++      guard #available(iOS 17.0, *) else { throw LiveActivitiesNotSupportedException() }
++      return try await HandyWorkspaceSearch.begin(action: action, presetId: presetId, query: query)
++    }
++
 +    AsyncFunction("readHandyNoteInbox") { () -> [[String: Any]] in
 +      try HandyNoteInbox.read()
 +    }

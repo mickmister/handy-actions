@@ -62,6 +62,21 @@ Each action captures fresh nonblank text. Its optional prefix is stored separate
 
 Delivery verifies `/api/sessions/{id}`, reads `/queue`, and checks `/conversation-preview?limit=1`. Idle agents receive `/follow-up` with `executor_config`; busy agents receive `/queue`. Existing queued content requires explicit **Append** or **Overwrite** in the editor. Append adds a newline plus the new prefixed prompt without re-prefixing old content. A queue containing redacted connection data cannot be appended safely; overwrite remains explicit. The queue is re-read before writing. **The current VD API has no atomic append/CAS**, so a final interclient race remains possible; no atomicity is claimed.
 
+### Search VD workspaces from the Lock Screen
+
+Add a **VD workspace search** (`vd-workspace-search`) action to an enabled preset and choose its saved VD origin. On the updated iOS 17+ binary:
+
+1. Tap the search action in the preset Live Activity (or circular/rectangular widget).
+2. Expand **Search VD workspaces**, choose **Search workspaces**, type a workspace-name query (up to 80 characters), and confirm **Search**.
+3. Choose a matching workspace in the separate search-results Live Activity. Results are case-insensitive name matches, exclude archived/deleted workspaces, sort by recent workspace update, and show three per page with **Previous**, **Next**, and **Search again** controls.
+4. Expand the new message notification. Its title identifies the workspace and newest-created session. Select **Add Note**, write the prompt, and send. This uses the existing native session-locked VD send/queue and draft-recovery behavior, without a prompt prefix.
+
+Selecting a workspace does not send a prompt. The newest session is resolved at selection time by `created_at`, then stays fixed in the notification snapshot; a newer session appearing while typing does not silently retarget the message. A workspace without a session, or whose newest session has no executor, reports an error rather than selecting an older destination. Search again after completing a selection to choose another workspace.
+
+Search creates/reuses one results activity from a foreground or eligible LiveActivityIntent entry point **before** notification submission; the native query callback only updates it. Protected on-device search records support cold-start intents and stale-result rejection. Network access and Keychain credentials stay in the host app. Search/selection use bounded, cancellable UIKit background tasks, not a persistent background service. Activity admission, authentication, keyboard/menu behavior and presentation remain controlled by iOS. Ordinary preset-notification search input uses the foreground composer fallback; use the Live Activity/widget button for the native Lock Screen flow. Older binaries show an explicit native-build requirement.
+
+This changes the pinned ExpoWidgets native patch and requires a **fresh signed iOS build**; an OTA alone cannot install the feature. Native compilation and physical locked/background/cold-start behavior must be verified on that build.
+
 ### Native background request candidate
 
 On a binary containing the new APIs, nonempty HTTP input replies and session-locked VD replies use non-foreground categories. Notifee invokes the ExpoWidgets host-side Swift helper directly, without waiting for React. The helper journals a protected record and durable duplicate-callback claim before requests, resolves headers from the host app's Keychain, refuses redirects, and uses an ephemeral URLSession with a bounded 20-second overall request window. Credentials are never copied into activity targets or notifications.

@@ -20,7 +20,7 @@ export function originAffectsSurfaces(state: HandyState, originId: string): bool
   const presets = settings.liveActivities || settings.notifications ? enabledPresets(state)
     : settings.lockScreenWidgets ? [widgetPreset(state)].filter(preset => !!preset) : [];
   return presets.some(preset => preset.actions.some(({ payload }) =>
-    (payload.type === 'http' || payload.type === 'vd-agent') && payload.originId === originId));
+    (payload.type === 'http' || payload.type === 'vd-agent' || payload.type === 'vd-workspace-search') && payload.originId === originId));
 }
 
 // Keep at most one in-flight refresh and one pending (latest) snapshot. The

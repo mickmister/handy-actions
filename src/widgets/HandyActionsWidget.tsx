@@ -6,7 +6,7 @@ export type HandyWidgetProps = {
   enabled: boolean;
   presetName: string;
   openUrl: string;
-  actions: { title: string; url: string; captureTarget?: string; siteGlyph?: string; systemImage?: 'note.text' }[];
+  actions: { title: string; url: string; captureTarget?: string; siteGlyph?: string; systemImage?: 'note.text' | 'magnifyingglass' }[];
 };
 
 const HandyActionsWidget = (props: HandyWidgetProps, environment: WidgetEnvironment) => {

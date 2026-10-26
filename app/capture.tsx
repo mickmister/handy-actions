@@ -15,6 +15,7 @@ import { Choice } from '@/components/FormControls';
 import { isLocalNoteAction } from '@/src/core/localNoteDelivery';
 import { runActionPayload, showTextInputNotification } from '@/src/core/handyNotifications';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
+import { beginWorkspaceSearch } from '@/src/core/workspaceSearch';
 
 const deliveriesInFlight = new Set<string>();
 
@@ -60,6 +61,13 @@ export default function CaptureScreen() {
     deliveriesInFlight.add(deliveryKey);
     setBusy(true);
     try {
+      if (target.payload.type === 'vd-workspace-search') {
+        setMessage(await beginWorkspaceSearch(target, presetId.current, value));
+        if (submissionId) await completeNote(submissionId);
+        if (draftId.current) await removeEditorDraft(draftId.current);
+        draftId.current=undefined;activeId.current=undefined;setText('');
+        return;
+      }
       if(sourceNoteId.current)await editNote(sourceNoteId.current,value);
       const pending = await queueNote(target, value || '[HTTP action]', submissionId,presetId.current,sourceNoteId.current);
       if (!pending) { setMessage('This note was already sent.'); return; }
@@ -112,7 +120,9 @@ export default function CaptureScreen() {
       draftId.current=undefined;
     } catch (error) {
       setQueueChoice(undefined);
-      setMessage(`Could not confirm delivery. Your draft is kept. Review the destination before explicitly retrying. ${error instanceof Error ? error.message : 'Request failed.'}`);
+      setMessage(target.payload.type === 'vd-workspace-search'
+        ? `Could not search workspaces. Your query is kept. ${error instanceof Error ? error.message : 'Search failed.'}`
+        : `Could not confirm delivery. Your draft is kept. Review the destination before explicitly retrying. ${error instanceof Error ? error.message : 'Request failed.'}`);
     } finally { deliveriesInFlight.delete(deliveryKey); setBusy(false); }
   }
 
@@ -192,7 +202,7 @@ export default function CaptureScreen() {
   async function postInputNotification(target: HandyAction) {
     try {
       await showTextInputNotification(target, presetId.current);
-      setMessage('Input notification posted. Expand it and select Add Note, or write here.');
+      setMessage(target.payload.type === 'vd-workspace-search' ? 'Search notification posted. Expand it and choose Search workspaces.' : 'Input notification posted. Expand it and select Add Note, or write here.');
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   }
 
@@ -210,9 +220,9 @@ export default function CaptureScreen() {
         }} />):<Text style={styles.copy}>No tags on this origin.</Text>}<Choice label="Close tags" onPress={()=>setTags(undefined)} /></View>:null}
       </>:null}
       {action && isInputPayload(action.payload) ? <>
-        <Text style={styles.copy}>Write a note here or use native notification input. The destination is configured on this action.</Text>
+        <Text style={styles.copy}>{action.payload.type === 'vd-workspace-search' ? 'Enter a workspace-name query here or use notification input. Select a result in the search Live Activity, then write a message to its newest-created session.' : 'Write a note here or use native notification input. The destination is configured on this action.'}</Text>
         <NoteComposer text={text} onChangeText={changeText} busy={busy} inputRef={inputRef} selection={selection} onSelectionChange={setSelection}
-          submitLabel={action.payload.type==='vd-agent'?'Send prompt':action.payload.type==='http'?'Send request':'Send note'} onSubmit={() => void deliver(action, text, activeId.current)} />
+          submitLabel={action.payload.type==='vd-workspace-search'?'Search workspaces':action.payload.type==='vd-agent'?'Send prompt':action.payload.type==='http'?'Send request':'Send note'} onSubmit={() => void deliver(action, text, activeId.current)} />
         {queueChoice?.status==='queued'?<View style={styles.card}>
           <Text style={styles.copy}>Already queued: {queueChoice.message.data.message}</Text>
           <Choice label="Append this prompt" disabled={busy} onPress={()=>void deliver(action,text,activeId.current,'append')} />

@@ -41,6 +41,7 @@ import { nativeActionInbox } from './nativeActionInbox';
 import { isRefreshPress, REFRESH_NOTIFICATION_ID, REFRESH_PRESS_ID } from './lockScreenRefresh';
 import { notificationEditorContext } from './notificationEditorContext';
 import { syncRecentWorkspacesLiveActivity } from './recentWorkspacesLiveActivity';
+import { beginWorkspaceSearch, workspaceSearchAvailable } from './workspaceSearch';
 
 const CHANNEL_ID = 'handy-actions';
 const INPUT_CATEGORY = 'handy-text-input';
@@ -124,6 +125,7 @@ async function configureCategories(state: HandyState): Promise<void> {
   await notifee.setNotificationCategories([
     {id:'handy-refresh-lock-screen-v1',actions:[{id:REFRESH_PRESS_ID,title:'Refresh Lock Screen',foreground:true}]},
     {id:'handy-action-editor-v1',actions:[]},
+    ...(workspaceSearchAvailable ? [{ id: 'handy-workspace-search-input-v1', actions: [{ id: 'handy-workspace-search-submit', title: 'Search workspaces', foreground: false, input: { placeholderText: 'Workspace name…', buttonText: 'Search' } }] }] : []),
     ...(nativeActionInbox?[{id:'handy-text-input-background-v1',actions:[{id:INPUT_PRESS,title:'Add Note',foreground:false,input:{placeholderText:'Write text…',buttonText:'Send'}}]}]:[]),
     { id: INPUT_CATEGORY, actions: [{ id: INPUT_PRESS, title: 'Add Note', foreground: true,
       input: { placeholderText: 'Write a note…', buttonText: 'Send' } }] },
@@ -368,6 +370,10 @@ async function syncStoredPresetNotifications(): Promise<void> {
 export async function showTextInputNotification(action: HandyAction, presetId?: string): Promise<void> {
   const status = await requestNotificationAccess();
   if (status.permission === 'denied') throw new Error('Notifications are disabled. You can write the note here instead.');
+  if (action.payload.type === 'vd-workspace-search') {
+    await beginWorkspaceSearch(action, presetId);
+    return;
+  }
   await configureCategories(await loadHandyState());
   const submissionId = makeId('submission');
   const nativeLocal = savesLocallyInNative(action);

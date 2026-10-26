@@ -80,6 +80,7 @@ function actionSummary(action: HandyAction): string {
   if (action.payload.type === 'qr') return action.payload.value;
   if (action.payload.type === 'http') return `${action.payload.method} ${action.payload.path}`;
   if (action.payload.type === 'vd-agent') return action.payload.session?.label ?? 'Choose a session each time';
+  if (action.payload.type === 'vd-workspace-search') return 'Search workspaces, then message the newest session';
   return action.payload.url;
 }
 

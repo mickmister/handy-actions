@@ -5,9 +5,9 @@ import { Choice, Field, formStyles as styles } from './FormControls';
 import { SessionPicker } from './SessionPicker';
 import { origins } from '@/src/core/origins';
 import type { OriginSummary } from '@/src/core/originRepository';
-import type { AgentActionPayload, HandyActionPayload, HttpActionPayload } from '@/src/core/handyModel';
+import type { AgentActionPayload, HandyActionPayload, HttpActionPayload, WorkspaceSearchActionPayload } from '@/src/core/handyModel';
 
-export function RemoteActionEditor({ value, onChange }: { value: HttpActionPayload | AgentActionPayload; onChange(value: HandyActionPayload): void }) {
+export function RemoteActionEditor({ value, onChange }: { value: HttpActionPayload | AgentActionPayload | WorkspaceSearchActionPayload; onChange(value: HandyActionPayload): void }) {
   const [profiles, setProfiles] = useState<OriginSummary[]>([]);
   const [message,setMessage] = useState('');
   useEffect(()=>{ void origins.list().then(setProfiles).catch(()=>setMessage('Could not load secure connections.')); },[]);
@@ -22,7 +22,7 @@ export function RemoteActionEditor({ value, onChange }: { value: HttpActionPaylo
       {value.bodyFormat!=='none'?<Field label="Request body" multiline value={value.body} onChangeText={body=>onChange({...value,body})} />:null}
       <View style={styles.row}><Switch value={value.captureText} onValueChange={captureText=>onChange({...value,captureText})} /><Text style={styles.copy}>Ask for text before sending</Text></View>
       <Text style={styles.copy}>Use {'{text}'} in the path or a JSON string/body. JSON is escaped safely. Requests have a 20-second timeout and never follow redirects or retry automatically.</Text>
-    </>:<>
+    </>:value.type==='vd-workspace-search'?<Text style={styles.copy}>Search active workspace names from notification input, choose a result on the Lock Screen, then write a message to its newest-created session. Results show three workspaces per page. No message is sent until you submit the second notification. Requires the updated iOS 17+ native build, notifications and Live Activities.</Text>:<>
       <Field label="Optional prompt prefix" multiline value={value.prefix} onChangeText={prefix=>onChange({...value,prefix})} />
       <Text style={styles.copy}>Prefix + newline + fresh prompt. Empty input never sends a prefix-only message.</Text>
       <View style={styles.row}><Switch value={!!value.session} onValueChange={locked=>{if(!locked)onChange({...value,session:undefined});else setMessage('Select a session below to lock this action.');}} /><Text style={styles.copy}>{value.session?'Locked to '+value.session.label:'Ask for session on every send'}</Text></View>
