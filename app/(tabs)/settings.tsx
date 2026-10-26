@@ -125,7 +125,7 @@ export default function SettingsScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Recent VD workspaces</Text>
-        <Text style={styles.copy}>Show the three most recently updated workspaces in the Workspaces view of the shared Lock Screen Live Activity. Archived and deleted worktrees are excluded.</Text>
+        <Text style={styles.copy}>Browse recently updated workspaces in the Workspaces view of the shared Lock Screen Live Activity, three per page. Use the previous/next controls to see more. Archived and deleted worktrees are excluded.</Text>
         <View style={styles.settingRow}>
           <Text style={styles.copy}>Show recent VD workspaces{Platform.OS !== 'ios' ? ' (iOS only)' : ''}</Text>
           <Switch accessibilityLabel="Show recent VD workspaces" value={recentWorkspaces.enabled}

@@ -36,7 +36,7 @@ export async function syncPresetLiveActivities(state: HandyState, renew = false)
   }
   // Publish actions/navigation before a slow VD fetch. The second transaction
   // updates data only; it cannot reset native search or the selected view.
-  await widgets.syncHandyActivity(JSON.stringify(configure({ originId: state.recentWorkspaces?.originId ?? '', links: [], message: 'Refreshing recent VD workspaces…', openUrl: '' })), renew);
+  await widgets.syncHandyActivity(JSON.stringify(configure({ originId: state.recentWorkspaces?.originId ?? '', links: [], message: 'Refreshing recent VD workspaces…', openUrl: '', loading: true })), renew);
   const recent = await loadRecentWorkspaces(state, {
     connection: origins.connection,
     workspaces: profile => createVdClient(createRequestClient(async () => profile, fetch), profile.id).workspaces(),

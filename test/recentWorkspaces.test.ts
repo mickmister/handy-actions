@@ -12,7 +12,7 @@ const workspace = (id: string, updated_at: string, extra: Partial<Workspace> = {
   id, name: `Workspace ${id}`, created_at: '2026-10-01T00:00:00Z', updated_at, ...extra,
 });
 
-test('orders recent active workspace names, removes duplicates, and bounds the list to three', () => {
+test('orders all recent active workspace names and removes duplicates without a three-result cap', () => {
   const workspaces = [
     workspace('old', '2026-10-01T00:00:00Z'),
     workspace('third', '2026-10-20T00:00:00Z'),
@@ -24,7 +24,7 @@ test('orders recent active workspace names, removes duplicates, and bounds the l
     workspace('invalid', 'not-a-date'),
   ];
   const links = recentWorkspaceLinks(profile.origin, workspaces);
-  assert.deepEqual(links.map(link => link.id), ['latest', 'second', 'third']);
+  assert.deepEqual(links.map(link => link.id), ['latest', 'second', 'third', 'old']);
   assert.equal(links[0].title, 'Recent workspaces');
   assert.equal(links[1].title, 'Fix mobile icons');
   assert.equal(workspaces[0].id, 'old', 'sorting must not mutate the caller’s response');
@@ -36,6 +36,20 @@ test('workspace browser links retain the selected origin and encode the workspac
   assert.deepEqual(recentWorkspaceLinks(profile.origin, [workspace('..', '2026-10-22T00:00:00Z')]), []);
   const [unnamed] = recentWorkspaceLinks(profile.origin, [workspace('12345678-rest', '2026-10-22T00:00:00Z', { name: null })]);
   assert.equal(unnamed.title, 'Workspace 12345678');
+});
+
+test('host snapshot retains every eligible workspace in recent order for later Lock Screen pages', async () => {
+  const records = Array.from({ length: 14 }, (_, index) => workspace(`w-${index}`, new Date(Date.UTC(2026, 9, index + 1)).toISOString()));
+  const snapshot = await loadRecentWorkspaces(enabled, {
+    connection: async () => profile,
+    workspaces: async () => [...records, { ...records[12] }, workspace('archived', '2026-10-26T00:00:00Z', { archived: true })],
+  });
+  assert.deepEqual(snapshot?.links.map(link => link.id), [...records].reverse().map(record => record.id));
+  // In particular, page two's first global index must still identify w-10,
+  // rather than index zero's w-13. The final partial page retains two entries.
+  assert.equal(snapshot?.links[3].id, 'w-10');
+  assert.deepEqual(snapshot?.links.slice(12).map(link => link.id), ['w-1', 'w-0']);
+  assert.equal(snapshot?.links.length, 14);
 });
 
 test('disabled lists and disabled Live Activities make no connection or API calls', async () => {

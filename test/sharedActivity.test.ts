@@ -33,6 +33,17 @@ test('standalone Workspaces content works without a preset, while the global swi
   assert.equal(disabled.recent, undefined);
 });
 
+test('shared host configuration forwards every recent result and identifies the temporary loading phase', () => {
+  const allRecent = { ...recent, links: Array.from({ length: 14 }, (_, index) => ({ id: `w-${index}`, title: `Workspace ${index}`, url: `http://vd.tailnet:3000/workspaces/w-${index}` })) };
+  const complete = sharedActivityConfiguration(state, { ...options, recent: allRecent });
+  assert.equal(complete.recent?.links.length, 14);
+  assert.equal(complete.recent?.loading, undefined);
+  const loading = sharedActivityConfiguration(state, { ...options, recent: { ...recent, links: [], loading: true, message: 'Refreshing…' } });
+  assert.equal(loading.recent?.loading, true);
+  assert.equal(loading.recent?.originId, complete.recent?.originId);
+  assert.deepEqual(loading.presets, complete.presets);
+});
+
 test('action reordering and origin changes reach the shared host snapshot, not separate per-preset activities', () => {
   const changed: HandyState = { presets: [{ ...state.presets[0], actions: [...state.presets[0].actions].reverse() }, { ...state.presets[2], actions: [{ ...state.presets[2].actions[0], payload: { type: 'vd-workspace-search', originId: 'other' } }] }] };
   const calls: string[] = [];

@@ -1,9 +1,9 @@
 diff --git a/ios/HandyActivityCoordinator.swift b/ios/HandyActivityCoordinator.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..93cad949afecefea4b17eb3b63796266fe2bd150
+index 0000000000000000000000000000000000000000..f1076d98b0b75bde4cc79292c109c8189130eeaf
 --- /dev/null
 +++ b/ios/HandyActivityCoordinator.swift
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,290 @@
 +import ActivityKit
 +import Foundation
 +import UIKit
@@ -22,6 +22,8 @@ index 0000000000000000000000000000000000000000..93cad949afecefea4b17eb3b63796266
 +    var previousView = "actions"
 +    var presetId = ""
 +    var page = 0
++    // Optional for backward-compatible decoding of pre-pagination state files.
++    var recentPage: Int?
 +    var searchId: String?
 +    var searchProps: String?
 +  }
@@ -63,6 +65,12 @@ index 0000000000000000000000000000000000000000..93cad949afecefea4b17eb3b63796266
 +    }
 +    let actions = presets.first(where: { $0["id"] as? String == state.presetId })?["actions"] as? [[String: Any]] ?? []
 +    state.page = max(0, min(state.page, max(0, (actions.count - 1) / 4)))
++    let recent = config["recent"] as? [String: Any]
++    // A loading placeholder has no rows yet; don't mistake it for a shrunken list.
++    if recent?["loading"] as? Bool != true {
++      let count = (recent?["links"] as? [Any] ?? []).count
++      state.recentPage = max(0, min(state.recentPage ?? 0, max(0, (count - 1) / 3)))
++    }
 +    if state.view == "actions", presets.isEmpty, config["recent"] != nil { state.view = "workspaces" }
 +  }
 +  @available(iOS 16.2, *)
@@ -102,6 +110,9 @@ index 0000000000000000000000000000000000000000..93cad949afecefea4b17eb3b63796266
 +    try await transaction {
 +      let config = try object(configuration)
 +      var state = try read()
++      let oldRecent = try object(state.configuration)["recent"] as? [String: Any]
++      let newRecent = config["recent"] as? [String: Any]
++      if oldRecent?["originId"] as? String != newRecent?["originId"] as? String { state.recentPage = 0 }
 +      if state.configuration != configuration { state.revision = UUID().uuidString }
 +      state.configuration = configuration
 +      if config["enabled"] as? Bool != true { state.searchId = nil; state.searchProps = nil; state.view = "actions" }
@@ -179,12 +190,21 @@ index 0000000000000000000000000000000000000000..93cad949afecefea4b17eb3b63796266
 +    } else if state.view == "workspaces" {
 +      props["title"] = "Recent VD workspaces"
 +      if let recent = config["recent"] as? [String: Any] {
++        let links = recent["links"] as? [[String: Any]] ?? []
++        let page = max(0, state.recentPage ?? 0)
++        let start = page * 3
++        let loading = recent["loading"] as? Bool == true
++        if !loading, !links.isEmpty { props["title"] = "\(page + 1)/\((links.count + 2) / 3) · Recent VD workspaces" }
 +        props["message"] = recent["message"] ?? ""
-+        props["results"] = try (recent["links"] as? [[String: Any]] ?? []).prefix(3).enumerated().map { index, link in
-+          ["title": String((link["title"] as? String ?? "Workspace").prefix(60)), "target": try target(state, "recent", ["index": index])]
++        props["results"] = try links.indices.dropFirst(start).prefix(3).map { index in
++          ["title": String((links[index]["title"] as? String ?? "Workspace").prefix(60)), "target": try target(state, "recent", ["index": index])]
 +        }
 +        if let originId = recent["originId"] as? String, !originId.isEmpty {
 +          navigation.append(try control("Search", state.searchId == nil ? "search" : "view", state.searchId == nil ? [:] : ["view": "search"]))
++        }
++        if !loading, recent["message"] as? String == "" {
++          if page > 0 { navigation.append(try control("‹", "recent-page", ["direction": -1])) }
++          if start + 3 < links.count { navigation.append(try control("›", "recent-page", ["direction": 1])) }
 +        }
 +      } else { props["message"] = "Enable recent VD workspaces and choose an origin in Settings." }
 +      if !(config["presets"] as? [Any] ?? []).isEmpty { navigation.insert(try control("Actions", "view", ["view": "actions"]), at: 0) }
@@ -246,6 +266,11 @@ index 0000000000000000000000000000000000000000..93cad949afecefea4b17eb3b63796266
 +      }
 +      if operation == "view", let view = value["view"] as? String, ["actions", "workspaces", "search"].contains(view), view != "search" || state.searchId != nil { state.view = view }
 +      if operation == "back" { state.view = state.previousView }
++      if operation == "recent-page", state.view == "workspaces",
++         let direction = value["direction"] as? Int, [-1, 1].contains(direction),
++         let recent = config["recent"] as? [String: Any], recent["loading"] as? Bool != true {
++        state.recentPage = (state.recentPage ?? 0) + direction
++      }
 +      if operation == "page", let direction = value["direction"] as? Int, [-1, 1].contains(direction) {
 +        let presets = config["presets"] as? [[String: Any]] ?? []
 +        if let index = presets.firstIndex(where: { $0["id"] as? String == state.presetId }) {

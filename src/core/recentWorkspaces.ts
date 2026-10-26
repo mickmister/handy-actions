@@ -3,7 +3,7 @@ import { normalizedOrigin, originUrl, type OriginProfile } from './originReposit
 import type { Workspace } from './vdClient.ts';
 
 export type WorkspaceLink = { id: string; title: string; url: string };
-export type RecentWorkspacesSnapshot = { originId: string; links: WorkspaceLink[]; message: string; openUrl: string };
+export type RecentWorkspacesSnapshot = { originId: string; links: WorkspaceLink[]; message: string; openUrl: string; loading?: boolean };
 
 export function recentWorkspacesEnabled(state: HandyState): boolean {
   return surfaceSettings(state).liveActivities && state.recentWorkspaces?.enabled === true;
@@ -21,7 +21,6 @@ export function recentWorkspaceLinks(origin: string, workspaces: Workspace[]): W
       seen.add(workspace.id);
       return true;
     })
-    .slice(0, 3)
     .map(workspace => ({
       id: workspace.id,
       title: workspace.name?.trim().slice(0, 100) || `Workspace ${workspace.id.slice(0, 8)}`,
