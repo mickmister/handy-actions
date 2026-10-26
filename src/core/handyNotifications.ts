@@ -125,6 +125,7 @@ async function configureCategories(state: HandyState): Promise<void> {
   await notifee.setNotificationCategories([
     {id:'handy-refresh-lock-screen-v1',actions:[{id:REFRESH_PRESS_ID,title:'Refresh Lock Screen',foreground:true}]},
     {id:'handy-action-editor-v1',actions:[]},
+    ...(nativeActionInbox ? [{id:'handy-agent-reply-v1',actions:[{id:INPUT_PRESS,title:'Reply',foreground:false,input:{placeholderText:'Reply to this session',buttonText:'Send'}}]}] : []),
     ...(workspaceSearchAvailable ? [{ id: 'handy-workspace-search-input-v1', actions: [{ id: 'handy-workspace-search-submit', title: 'Search workspaces', foreground: false, input: { placeholderText: 'Workspace name…', buttonText: 'Search' } }] }] : []),
     ...(nativeActionInbox?[{id:'handy-text-input-background-v1',actions:[{id:INPUT_PRESS,title:'Add Note',foreground:false,input:{placeholderText:'Write text…',buttonText:'Send'}}]}]:[]),
     { id: INPUT_CATEGORY, actions: [{ id: INPUT_PRESS, title: 'Add Note', foreground: true,

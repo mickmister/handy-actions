@@ -9,7 +9,10 @@ export type SharedHandyActivityProps = {
   title: string;
   message: string;
   rows?: LiveActivityActionLink[][];
-  results?: { title: string; target: string }[];
+  results?: { title: string; target: string; solidGlyph?: string }[];
+  responseText?: string;
+  responseLinks?: {title:string;url:string}[];
+  primarySolidGlyph?: string;
   navigation: { title: string; target: string }[];
   theme?: SharedActivityConfiguration['theme'];
 };
@@ -29,7 +32,8 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
       {!props.message ? (props.rows ?? []).map((row, index) => <HStack key={index} spacing={5}>
         {row.map(action => {
           const label = <HStack spacing={6} modifiers={[padding({ horizontal: 8 }), frame({ minWidth: 0, maxWidth: 10000, height: 44 }), background(tile), cornerRadius(12)]}>
-            {action.siteGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Brands-Regular', size: 15 }), foregroundStyle(highlight)]}>{action.siteGlyph}</Text>
+            {action.solidGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Free-Solid', size: 15 }), foregroundStyle(highlight)]}>{action.solidGlyph}</Text>
+              : action.siteGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Brands-Regular', size: 15 }), foregroundStyle(highlight)]}>{action.siteGlyph}</Text>
               : <Image systemName={action.systemImage ?? (action.captureTarget ? 'square.and.pencil' : 'arrow.up.right')} color={highlight} size={14} />}
             <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(2), frame({ minWidth: 0, maxWidth: 10000, alignment: 'leading' })]}>{action.title}</Text>
           </HStack>;
@@ -39,11 +43,13 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
       </HStack>) : null}
       {!props.message ? (props.results ?? []).map(result => <Button key={result.target} target={result.target} modifiers={[buttonStyle('plain'), frame({ minWidth: 0, maxWidth: 10000 })]}>
         <HStack spacing={6} modifiers={[padding({ horizontal: 8 }), frame({ minWidth: 0, maxWidth: 10000, height: 30 }), background(tile), cornerRadius(8)]}>
-          <Image systemName="folder" color={highlight} size={13} />
+          {result.solidGlyph ? <Text modifiers={[font({family:'FontAwesome6Free-Solid',size:13}),foregroundStyle(highlight)]}>{result.solidGlyph}</Text> : <Image systemName="folder" color={highlight} size={13} />}
           <Text modifiers={[font({ size: 13, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1), frame({ minWidth: 0, maxWidth: 10000, alignment: 'leading' })]}>{result.title}</Text>
         </HStack>
       </Button>) : null}
       {props.message ? <Text modifiers={[font({ size: 12 }), foregroundStyle(ink), lineLimit(3)]}>{props.message}</Text> : null}
+      {props.responseText ? <Text modifiers={[font({size:12}),foregroundStyle(ink),lineLimit(3)]}>{props.responseText}</Text> : null}
+      {props.responseLinks?.length ? <HStack spacing={5}>{props.responseLinks.map(link=><Link key={link.url} destination={link.url}><Text modifiers={[font({size:11}),foregroundStyle(highlight),lineLimit(1)]}>{link.title}</Text></Link>)}</HStack> : null}
       <HStack spacing={4}>{props.navigation.map(control => <Button key={control.target} target={control.target} modifiers={[buttonStyle('plain'), frame({ minWidth: 0, maxWidth: 10000 })]}>
         <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1), frame({ minWidth: 0, maxWidth: 10000, height: 26 }), background(tile), cornerRadius(8)]}>{control.title}</Text>
       </Button>)}</HStack>
@@ -52,8 +58,8 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
   return {
     banner: <VStack modifiers={[activityBackgroundTint(colors[0]), background({ type: 'linearGradient', colors, startPoint: { x: 0, y: 0 }, endPoint: { x: 1, y: 1 } })]}>{list(false)}</VStack>,
     bannerSmall: list(false),
-    compactLeading: <Image systemName={props.view === 'actions' ? 'square.and.pencil' : 'folder'} color={dark ? accent : '#A7F3D0'} />,
-    minimal: <Image systemName="square.and.pencil" color={dark ? accent : '#A7F3D0'} />,
+    compactLeading: props.primarySolidGlyph || props.view === 'replies' ? <Text modifiers={[font({family:'FontAwesome6Free-Solid',size:14}),foregroundStyle(dark?accent:'#A7F3D0')]}>{props.primarySolidGlyph ?? '\uf544'}</Text> : <Image systemName={props.view === 'actions' ? 'square.and.pencil' : props.view === 'search' ? 'magnifyingglass' : 'folder'} color={dark ? accent : '#A7F3D0'} />,
+    minimal: props.primarySolidGlyph || props.view === 'replies' ? <Text modifiers={[font({family:'FontAwesome6Free-Solid',size:14}),foregroundStyle(dark?accent:'#A7F3D0')]}>{props.primarySolidGlyph ?? '\uf544'}</Text> : <Image systemName={props.view === 'search' ? 'magnifyingglass' : 'square.and.pencil'} color={dark ? accent : '#A7F3D0'} />,
     expandedBottom: list(true),
   };
 };

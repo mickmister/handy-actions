@@ -1,10 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { makeId, type AgentSession, type HandyAction } from './handyModel';
-export type EditorDraft = { id: string; action: HandyAction; presetId?: string; text: string; createdAt: string; session?:AgentSession; submissionId?:string; sourceNoteId?:string };
+export type EditorDraft = { id: string; action: HandyAction; presetId?: string; text: string; createdAt: string; session?:AgentSession; submissionId?:string; sourceNoteId?:string; sourceNoteIds?:string[]; combineStep?: 'order' | 'destination' | 'review' };
 const PREFIX = 'handy-actions/editor-draft/';
 let writes:Promise<unknown>=Promise.resolve();
 function serialize<T>(work:()=>Promise<T>):Promise<T> {const next=writes.then(work);writes=next.catch(()=>{});return next;}
-export function saveEditorDraft(action: HandyAction, text: string, presetId?: string, id = makeId('editor'), context:Pick<EditorDraft,'session'|'submissionId'|'sourceNoteId'>={}) {
+export function saveEditorDraft(action: HandyAction, text: string, presetId?: string, id = makeId('editor'), context:Pick<EditorDraft,'session'|'submissionId'|'sourceNoteId'|'sourceNoteIds'|'combineStep'>={}) {
   const draft: EditorDraft = { id, action, text, presetId, createdAt: new Date().toISOString(),...context };
   return serialize(async()=>{await AsyncStorage.setItem(PREFIX + id, JSON.stringify(draft)); return draft;});
 }

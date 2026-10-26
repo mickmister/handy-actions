@@ -3,7 +3,7 @@ import * as ExpoLinking from 'expo-linking';
 import { isInputPayload, surfaceSettings, widgetPreset, type HandyState } from './handyModel';
 import HandyActionsWidget from '../widgets/HandyActionsWidget';
 import { nativeCaptureTarget } from './nativeCaptureTarget';
-import { nativeSiteIcon } from './nativeSiteIcon';
+import { nativeAgentIcon, nativeSiteIcon } from './nativeSiteIcon';
 
 export async function syncLockScreenWidget(state: HandyState): Promise<void> {
   const preset = widgetPreset(state);
@@ -17,6 +17,7 @@ export async function syncLockScreenWidget(state: HandyState): Promise<void> {
     actions: enabled ? preset.actions.slice(0, 3).map((action) => ({
       title: action.name,
       siteGlyph: nativeSiteIcon(action.payload),
+      solidGlyph: nativeAgentIcon(action.payload),
       systemImage: action.payload.type === 'notes' ? 'note.text' : action.payload.type === 'vd-workspace-search' ? 'magnifyingglass' : undefined,
       url: ExpoLinking.createURL(action.payload.type === 'notes' ? '/notes' : '/capture', { queryParams: { presetId: preset.id, actionId: action.id, notification: isInputPayload(action.payload) ? '1' : '0' } }),
       captureTarget: nativeCaptureTarget(preset.id, action),

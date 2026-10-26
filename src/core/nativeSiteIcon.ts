@@ -10,3 +10,7 @@ export function nativeSiteIcon(payload: HandyActionPayload): string | undefined 
   const codepoint = FontAwesome6.getRawGlyphMap('brand')[name];
   return codepoint ? String.fromCodePoint(codepoint) : undefined;
 }
+
+export function nativeAgentIcon(payload: HandyActionPayload): string | undefined {
+  return payload.type === 'vd-agent' ? String.fromCodePoint(FontAwesome6.getRawGlyphMap('solid').robot) : undefined;
+}

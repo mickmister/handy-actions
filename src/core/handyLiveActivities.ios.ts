@@ -6,7 +6,7 @@ import type { HandyState } from './handyModel';
 import SharedHandyActivity from '../liveActivities/SharedHandyActivity';
 import { activityTheme } from './handyThemes';
 import { nativeCaptureTarget } from './nativeCaptureTarget';
-import { nativeSiteIcon } from './nativeSiteIcon';
+import { nativeAgentIcon, nativeSiteIcon } from './nativeSiteIcon';
 import { loadRecentWorkspaces, recentWorkspacesEnabled, type RecentWorkspacesSnapshot } from './recentWorkspaces';
 import { origins } from './origins';
 import { createRequestClient } from './requestClient';
@@ -23,7 +23,7 @@ export async function syncPresetLiveActivities(state: HandyState, renew = false)
     openUrl: ExpoLinking.createURL('/settings'), recent,
     theme: activityTheme(state.theme, new Date().toISOString()),
     link: (action, presetId, input) => ({
-      title: action.name, siteGlyph: nativeSiteIcon(action.payload),
+      title: action.name, siteGlyph: nativeSiteIcon(action.payload), solidGlyph: nativeAgentIcon(action.payload),
       systemImage: action.payload.type === 'notes' ? 'note.text' : action.payload.type === 'vd-workspace-search' ? 'magnifyingglass' : undefined,
       url: ExpoLinking.createURL(action.payload.type === 'notes' ? '/notes' : '/capture', {
         queryParams: { presetId, actionId: action.id, notification: input ? '1' : '0' },

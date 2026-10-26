@@ -1,11 +1,12 @@
 import * as ExpoLinking from 'expo-linking';
+import { fetch } from 'expo/fetch';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { NoteComposer, useNoteStyles } from '@/components/NoteComposer';
 import { findAction, isInputPayload, makeId, textInputUrl, type AgentSession, type HandyAction } from '@/src/core/handyModel';
-import { completeNote, confirmAgentHandoff, editNote, markNoteAttempt, pendingNotes, queueNote, saveNote } from '@/src/core/handyNotes';
+import { completeNote, editNote, markNoteAttempt, pendingNotes, queueNote, saveNote } from '@/src/core/handyNotes';
 import { readEditorDraft, removeEditorDraft, saveEditorDraft } from '@/src/core/editorDrafts';
 import { request } from '@/src/core/requests';
 import { httpRequestSpec } from '@/src/core/httpActions';
@@ -16,6 +17,9 @@ import { isLocalNoteAction } from '@/src/core/localNoteDelivery';
 import { runActionPayload, showTextInputNotification } from '@/src/core/handyNotifications';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 import { beginWorkspaceSearch } from '@/src/core/workspaceSearch';
+import { agentSendReceipts, agentReplyTrackingAvailable, prepareAgentReply } from '@/src/core/agentReplies';
+import { origins } from '@/src/core/origins';
+import { createRequestClient } from '@/src/core/requestClient';
 
 const deliveriesInFlight = new Set<string>();
 
@@ -37,6 +41,7 @@ export default function CaptureScreen() {
   const presetId = useRef(params.presetId);
   const activeId = useRef<string | undefined>(undefined);
   const sourceNoteId = useRef<string | undefined>(undefined);
+  const sourceNoteIds = useRef<string[] | undefined>(undefined);
   const started = useRef('');
   const action = snapshot ?? findAction(handy.state, String(params.actionId ?? ''), params.presetId)?.action;
 
@@ -44,7 +49,7 @@ export default function CaptureScreen() {
     setText(value); setQueueChoice(undefined);
     if (!action) return;
     draftId.current ??= makeId('editor');
-    void saveEditorDraft(action, value, presetId.current, draftId.current,{session:selectedSession,submissionId:activeId.current,sourceNoteId:sourceNoteId.current}).catch(()=>setMessage('Could not save the draft on this device.'));
+    void saveEditorDraft(action, value, presetId.current, draftId.current,{session:selectedSession,submissionId:activeId.current,sourceNoteId:sourceNoteId.current,sourceNoteIds:sourceNoteIds.current,combineStep:sourceNoteIds.current?.length?'review':undefined}).catch(()=>setMessage('Could not save the draft on this device.'));
   }
 
   async function deliver(target: HandyAction, value: string, submissionId?: string, operation?: 'append'|'overwrite') {
@@ -70,10 +75,10 @@ export default function CaptureScreen() {
         return;
       }
       if(sourceNoteId.current)await editNote(sourceNoteId.current,value);
-      const pending = await queueNote(target, value || '[HTTP action]', submissionId,presetId.current,sourceNoteId.current);
+      const pending = await queueNote(target, value || '[HTTP action]', submissionId,presetId.current,sourceNoteId.current,sourceNoteIds.current);
       if (!pending) { setMessage('This note was already sent.'); return; }
       activeId.current = pending.id;
-      if(draftId.current)await saveEditorDraft(editorAction,value,presetId.current,draftId.current,{session,submissionId:pending.id,sourceNoteId:sourceNoteId.current});
+      if(draftId.current)await saveEditorDraft(editorAction,value,presetId.current,draftId.current,{session,submissionId:pending.id,sourceNoteId:sourceNoteId.current,sourceNoteIds:sourceNoteIds.current});
       if(target.payload.type==='http' || target.payload.type==='vd-agent') {
         await markNoteAttempt(pending.id);
         let resultMessage = 'Request sent.';
@@ -81,16 +86,24 @@ export default function CaptureScreen() {
           const {path,...spec} = httpRequestSpec(target.payload,target.payload.captureText?value:'');
           await request(target.payload.originId,path,spec,false);
         } else {
-          const result = await createVdClient(request,target.payload.originId).send(target.payload.session!,prefixedPrompt(target.payload.prefix,value),operation && queueChoice ? {operation,expected:queueChoice} : undefined);
+          const payload = target.payload;
+          const profile = await origins.connection(payload.originId);
+          const sendRequest = createRequestClient(async()=>profile,fetch);
+          let watchedPrompt = prefixedPrompt(payload.prefix,value);
+          const result = await createVdClient(sendRequest,payload.originId).send(payload.session!,watchedPrompt,operation && queueChoice ? {operation,expected:queueChoice} : undefined,async prompt=>{
+            watchedPrompt = prompt;
+            await prepareAgentReply(pending.id,payload,prompt,profile.origin);
+          });
           if(result.kind==='needs-choice') {setQueueChoice(result.queue);setMessage('A message is already queued. Review it, then choose append or overwrite.');return;}
-          if(pending.sourceNoteId)await confirmAgentHandoff(pending.id,pending.sourceNoteId,target,result.kind);
-          resultMessage = result.kind==='queued'?'Prompt queued for the busy agent.':'Prompt sent to the selected session.';
+          const sources = pending.sourceNoteIds ?? (pending.sourceNoteId ? [pending.sourceNoteId] : []);
+          await agentSendReceipts.record({id:pending.id,action:target,sources,result,prompt:watchedPrompt});
+          resultMessage = (result.kind==='queued'?'Prompt queued for the busy agent.':'Prompt sent to the selected session.') + (!agentReplyTrackingAvailable?' Install the updated native build for reply tracking.':'');
         }
         await completeNote(pending.id);
         if(draftId.current)await removeEditorDraft(draftId.current);
         draftId.current=undefined;activeId.current=undefined;
         setText('');setSession(undefined);setQueueChoice(undefined);setMessage(resultMessage+(sourceNoteId.current?' Source note marked completed.':''));
-        if(sourceNoteId.current)router.replace('/notes');
+        if(sourceNoteId.current || sourceNoteIds.current?.length)router.replace('/notes');
         return;
       }
       if(target.payload.type!=='text-input')return;
@@ -136,6 +149,7 @@ export default function CaptureScreen() {
     setMessage('');
     activeId.current = undefined;
     sourceNoteId.current = undefined;
+    sourceNoteIds.current = undefined;
     draftId.current = params.draftId;
     presetId.current = params.presetId;
     setSession(undefined);setQueueChoice(undefined);setTags(undefined);
@@ -151,6 +165,7 @@ export default function CaptureScreen() {
         setSnapshot(draft.action);setText(draft.text);setSelection({start:draft.text.length,end:draft.text.length});
         presetId.current=draft.presetId;
         sourceNoteId.current=draft.sourceNoteId;
+        sourceNoteIds.current=draft.sourceNoteIds;
         setSession(draft.session);activeId.current=draft.submissionId;
         const attempted=draft.submissionId && (await pendingNotes()).find(p=>p.id===draft.submissionId)?.attempted;
         if(attempted)setMessage('Previous delivery may have succeeded. Review the destination before retrying.');
@@ -170,6 +185,7 @@ export default function CaptureScreen() {
         setSnapshot(pending.action);
         presetId.current=pending.presetId;
         sourceNoteId.current=pending.sourceNoteId;
+        sourceNoteIds.current=pending.sourceNoteIds;
         setText(pending.text);
         activeId.current = pending.id;
         if(params.submit==='1' && !pending.attempted) await deliver(pending.action, pending.text, pending.id);
@@ -213,6 +229,7 @@ export default function CaptureScreen() {
       <Text style={styles.title}>{action?.name ?? 'Action'}</Text>
       {action?.payload.type==='vd-agent'?<>
         <Text style={styles.copy}>{action.payload.session?`Locked session: ${action.payload.session.label}`:'Choose a session for this send.'}</Text>
+        {action.payload.session?<Text style={styles.copy}>Origin: {action.payload.originId} · Workspace: {action.payload.session.workspaceId}</Text>:null}
         {!action.payload.session?<SessionPicker originId={action.payload.originId} value={session} disabled={busy} onSelect={next=>{setSession(next);changeText(text,next);}} />:null}
         {action.payload.prefix?<Text style={styles.copy}>Prefix: {action.payload.prefix}</Text>:null}
         <Choice label="Insert tag…" disabled={busy} onPress={()=>void showTags()} />
@@ -230,9 +247,9 @@ export default function CaptureScreen() {
           <Choice label="Overwrite queued message" disabled={busy} onPress={()=>void deliver(action,text,activeId.current,'overwrite')} />
           <Text style={styles.copy}>The queue is rechecked before writing. Concurrent changes on another client can still race.</Text>
         </View>:null}
-        {!sourceNoteId.current?<Pressable style={styles.button} disabled={busy} onPress={() => void postInputNotification(action)}>
+        {!sourceNoteId.current && !sourceNoteIds.current?.length?<Pressable style={styles.button} disabled={busy} onPress={() => void postInputNotification(action)}>
           <Text style={styles.buttonText}>Use notification input</Text>
-        </Pressable>:<Text style={styles.copy}>Confirmed send or queue acceptance completes the source note. Failed or uncertain delivery keeps it in the inbox.</Text>}
+        </Pressable>:<Text style={styles.copy}>Send or queue acceptance marks {sourceNoteIds.current?.length ?? 1} source note(s) addressed. Originals are retained.</Text>}
       </> : null}
       {action?.payload.type==='http'&&!action.payload.captureText?<Choice label="Run request" disabled={busy} onPress={()=>void deliver(action,'',activeId.current)} />:null}
       <Text accessibilityLiveRegion="polite" style={styles.copy}>{message || (!handy.loaded ? 'Loading action…' : '')}</Text>

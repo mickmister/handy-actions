@@ -1,9 +1,9 @@
 diff --git a/ios/HandyActivityCoordinator.swift b/ios/HandyActivityCoordinator.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e5d727238
+index 0000000000000000000000000000000000000000..d12f35141c727690483500564b24915028e178a0
 --- /dev/null
 +++ b/ios/HandyActivityCoordinator.swift
-@@ -0,0 +1,291 @@
+@@ -0,0 +1,342 @@
 +import ActivityKit
 +import Foundation
 +import UIKit
@@ -25,6 +25,8 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +    var page = 0
 +    // Optional for backward-compatible decoding of pre-pagination state files.
 +    var recentPage: Int?
++    var replyPage: Int?
++    var replyId: String?
 +    var searchId: String?
 +    var searchProps: String?
 +  }
@@ -58,8 +60,8 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +  }
 +  private static func encode(_ value: Any) throws -> String { String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self) }
 +  private static func normalize(_ state: inout State, _ config: [String: Any]) {
-+    if !["actions", "workspaces", "search"].contains(state.view) { state.view = "actions" }
-+    if !["actions", "workspaces"].contains(state.previousView) { state.previousView = "actions" }
++    if !["actions", "workspaces", "search", "replies"].contains(state.view) { state.view = "actions" }
++    if !["actions", "workspaces", "replies"].contains(state.previousView) { state.previousView = "actions" }
 +    let presets = config["presets"] as? [[String: Any]] ?? []
 +    if !presets.contains(where: { $0["id"] as? String == state.presetId }) {
 +      state.presetId = presets.first?["id"] as? String ?? ""; state.page = 0
@@ -87,7 +89,7 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +      return
 +    }
 +    let config = try object(state.configuration)
-+    let useful = !(config["presets"] as? [Any] ?? []).isEmpty || config["recent"] != nil || state.searchId != nil
++    let useful = !(config["presets"] as? [Any] ?? []).isEmpty || config["recent"] != nil || state.searchId != nil || !((try? HandyAgentReplies.snapshots()) ?? []).isEmpty
 +    let enabled = config["enabled"] as? Bool == true && useful
 +    let instances = activities()
 +    let keep = enabled && !renew ? instances.first(where: { $0.content.state.name == name }) : nil
@@ -121,6 +123,17 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +      try await reconcile(state, allowStart: false, renew: renew)
 +      if #unavailable(iOS 17.0) { return "The shared Live Activity requires iOS 17 or later. Actions remain available in the app." }
 +      return activities().isEmpty ? "Live Activity off or no enabled content." : "One Handy Actions Live Activity refreshed (\(state.view))."
++    }
++  }
++  @available(iOS 17.0, *)
++  static func publishReplies() async throws {
++    try await transaction {
++      // A stream callback only updates an existing card. Never start/renew it,
++      // change focus, replace a search snapshot, or retire the dashboard on completion.
++      guard !activities().filter({ $0.content.state.name == name }).isEmpty else { return }
++      let state = try read()
++      if state.view == "replies", let id = state.replyId { try? HandyAgentReplies.markRead(id) }
++      try await reconcile(state, allowStart: false)
 +    }
 +  }
 +  @available(iOS 16.2, *)
@@ -188,6 +201,27 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +        if let previous = search["previous"] as? String { navigation.append(["title": "‹", "target": previous]) }
 +        if let next = search["next"] as? String { navigation.append(["title": "›", "target": next]) }
 +      }
++    } else if state.view == "replies" {
++      let replies = try HandyAgentReplies.snapshots()
++      if let id = state.replyId, let selected = replies.first(where: { $0["id"] as? String == id }) {
++        props["title"] = String((selected["label"] as? String ?? "Agent").prefix(60)) + " · " + (selected["status"] as? String ?? "")
++        let text = selected["excerpt"] as? String ?? ""
++        props["responseText"] = text.isEmpty ? "Waiting for verified agent response…" : text
++        props["responseLinks"] = (selected["links"] as? [String] ?? []).prefix(3).map { ["title": URL(string: $0)?.host ?? "Open link", "url": $0] }
++        navigation.append(try control("‹ Replies", "reply-list"))
++        navigation.append(try control("Reply", "reply-send", ["id": id]))
++      } else {
++        let page = max(0, min(state.replyPage ?? 0, max(0, (replies.count - 1) / 3)))
++        props["title"] = "Agent replies · \(page + 1)/\(max(1, (replies.count + 2) / 3))"
++        props["results"] = try replies.dropFirst(page * 3).prefix(3).map { reply in
++          ["title": (reply["unread"] as? Bool == true ? "• " : "") + String((reply["label"] as? String ?? "Agent").prefix(45)) + " · " + (reply["status"] as? String ?? ""), "solidGlyph": "\u{f544}", "target": try target(state, "reply-open", ["id": reply["id"] as? String ?? ""])]
++        }
++        if replies.isEmpty { props["message"] = "Agent responses to messages sent from Handy Actions will appear here." }
++        if page > 0 { navigation.append(try control("‹", "reply-page", ["direction": -1])) }
++        if (page + 1) * 3 < replies.count { navigation.append(try control("›", "reply-page", ["direction": 1])) }
++      }
++      navigation.append(try control("Actions", "view", ["view": "actions"]))
++      navigation.append(try control("Workspaces", "view", ["view": "workspaces"]))
 +    } else if state.view == "workspaces" {
 +      props["title"] = "Recent VD workspaces"
 +      if let recent = config["recent"] as? [String: Any] {
@@ -198,7 +232,7 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +        if !loading, !links.isEmpty { props["title"] = "\(page + 1)/\((links.count + 2) / 3) · Recent VD workspaces" }
 +        props["message"] = recent["message"] ?? ""
 +        props["results"] = try links.indices.dropFirst(start).prefix(3).map { index in
-+          ["title": String((links[index]["title"] as? String ?? "Workspace").prefix(60)), "target": try target(state, "recent", ["index": index])]
++          ["title": String((links[index]["title"] as? String ?? "Workspace").prefix(60)), "solidGlyph": "\u{f544}", "target": try target(state, "recent", ["index": index])]
 +        }
 +        if let originId = recent["originId"] as? String, !originId.isEmpty {
 +          navigation.append(try control("Search", state.searchId == nil ? "search" : "view", state.searchId == nil ? [:] : ["view": "search"]))
@@ -221,21 +255,28 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +          var link: [String: Any] = ["title": String((action["title"] as? String ?? "Action").prefix(48)), "url": action["url"] as? String ?? config["openUrl"] as? String ?? ""]
 +          if action["captureTarget"] is String { link["captureTarget"] = try target(state, "action", ["presetId": state.presetId, "actionId": action["id"] as? String ?? ""]) }
 +          if let glyph = action["siteGlyph"] { link["siteGlyph"] = glyph }
++          if let glyph = action["solidGlyph"] { link["solidGlyph"] = glyph }
 +          if let symbol = action["systemImage"] { link["systemImage"] = symbol }
 +          if rows.isEmpty || rows[rows.count - 1].count == 2 { rows.append([]) }
 +          rows[rows.count - 1].append(link)
 +        }
 +        props["rows"] = rows
++        if let glyph = rows.first?.first?["solidGlyph"] { props["primarySolidGlyph"] = glyph }
 +        if state.page > 0 || index > 0 { navigation.append(try control("‹", "page", ["direction": -1])) }
 +        if start + 4 < actions.count || index + 1 < presets.count { navigation.append(try control("›", "page", ["direction": 1])) }
 +      } else { props["message"] = "Enable a preset with actions in the app." }
 +      navigation.insert(try control("Workspaces", "view", ["view": "workspaces"]), at: 0)
 +      if state.searchId != nil { navigation.append(try control("Search", "view", ["view": "search"])) }
 +    }
++    if state.view != "replies" {
++      let unread = (try? HandyAgentReplies.snapshots().filter { $0["unread"] as? Bool == true }.count) ?? 0
++      navigation.append(try control(unread > 0 ? "Replies (\(unread))" : "Replies", "view", ["view": "replies"]))
++    }
 +    props["navigation"] = navigation
 +    let bytes = try JSONSerialization.data(withJSONObject: ["name": name, "props": try encode(props)])
 +    if bytes.count > 3400 {
 +      props.removeValue(forKey: "rows"); props.removeValue(forKey: "results")
++      props.removeValue(forKey: "responseLinks"); props.removeValue(forKey: "responseText")
 +      props["message"] = "This page exceeds the Lock Screen size budget. Open the app to use its actions."
 +    }
 +    guard try JSONSerialization.data(withJSONObject: ["name": name, "props": encode(props)]).count <= 3500 else { throw Failure(message: "Activity content is too large. Shorten labels and refresh.") }
@@ -252,6 +293,15 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +      let config = try object(state.configuration)
 +      guard config["enabled"] as? Bool == true else { throw Failure(message: "Live Activities are disabled in Handy Actions.") }
 +      let operation = value["operation"] as? String ?? ""
++      if operation == "reply-open", let id = value["id"] as? String {
++        try HandyAgentReplies.markRead(id); state.replyId = id; state.view = "replies"
++      }
++      if operation == "reply-list" { state.replyId = nil }
++      if operation == "reply-page", let direction = value["direction"] as? Int, [-1, 1].contains(direction) {
++        let count = try HandyAgentReplies.snapshots().count
++        state.replyPage = max(0, min((state.replyPage ?? 0) + direction, max(0, (count - 1) / 3)))
++      }
++      if operation == "reply-send", let id = value["id"] as? String { return ["replyId": id] }
 +      if operation == "action" {
 +        let presets = config["presets"] as? [[String: Any]] ?? []
 +        let preset = presets.first { $0["id"] as? String == value["presetId"] as? String }
@@ -265,7 +315,7 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +        guard let index = value["index"] as? Int, links.indices.contains(index), let id = links[index]["id"] as? String else { throw Failure(message: "Workspace results changed. Refresh and try again.") }
 +        return ["originId": origin, "workspaceId": id, "title": links[index]["title"] as? String ?? "Workspace"]
 +      }
-+      if operation == "view", let view = value["view"] as? String, ["actions", "workspaces", "search"].contains(view), view != "search" || state.searchId != nil { state.view = view }
++      if operation == "view", let view = value["view"] as? String, ["actions", "workspaces", "search", "replies"].contains(view), view != "search" || state.searchId != nil { state.view = view }
 +      if operation == "back" { state.view = state.previousView }
 +      if operation == "recent-page", state.view == "workspaces",
 +         let direction = value["direction"] as? Int, [-1, 1].contains(direction),
@@ -287,7 +337,8 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +      try await reconcile(state, allowStart: true)
 +      return [:]
 +    }
-+    if let capture = command["captureTarget"] as? String {
++    if let replyId = command["replyId"] as? String { try await HandyAgentReplies.reply(replyId) }
++    else if let capture = command["captureTarget"] as? String {
 +      if capture.hasPrefix("handy-workspace-search-v1:") { try await HandyWorkspaceSearch.perform(capture) }
 +      else { _ = try await HandyNoteCapture.post(target: capture) }
 +    } else if let origin = command["originId"] as? String {
@@ -295,21 +346,387 @@ index 0000000000000000000000000000000000000000..b2b33b13d2be397c7f9e61f63fb32f2e
 +    }
 +  }
 +}
+diff --git a/ios/HandyAgentReplies.swift b/ios/HandyAgentReplies.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..10eeb0cd8ab77fa8e0bebf840fa560c694dfa042
+--- /dev/null
++++ b/ios/HandyAgentReplies.swift
+@@ -0,0 +1,360 @@
++import ActivityKit
++import CryptoKit
++import Foundation
++import UIKit
++import UserNotifications
++
++// Host-only durable watches. No network or credentials are exposed to WidgetKit.
++@MainActor
++@available(iOSApplicationExtension, unavailable)
++enum HandyAgentReplies {
++  struct Watch: Codable {
++    var id: String
++    var originId: String
++    var origin: String
++    var target: String
++    var prompt: String
++    var baseline: [String]
++    var createdAt: Date
++    var processId: String?
++    var status = "preparing"
++    var excerpt = ""
++    var links: [String] = []
++    var unread = false
++    var notified = false
++    var summaryAttempts = 0
++  }
++  private static var tasks: [String: Task<Void, Never>] = [:]
++  private static var observers: [NSObjectProtocol] = []
++  private static var background = UIBackgroundTaskIdentifier.invalid
++  private static var expiry: Task<Void, Never>?
++  private static var suspended = false
++  private static var generation = UUID()
++  private static func folder() throws -> URL {
++    let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("HandyAgentReplies-v1", isDirectory: true)
++    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
++    return directory
++  }
++  private static func file(_ id: String) throws -> URL {
++    let digest = SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
++    return try folder().appendingPathComponent(digest + ".json")
++  }
++  static func all() throws -> [Watch] {
++    try FileManager.default.contentsOfDirectory(at: folder(), includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }.map { try JSONDecoder().decode(Watch.self, from: Data(contentsOf: $0)) }.sorted { $0.createdAt > $1.createdAt }
++  }
++  private static func read(_ id: String) throws -> Watch { try JSONDecoder().decode(Watch.self, from: Data(contentsOf: file(id))) }
++  private static func save(_ watch: Watch) throws { try JSONEncoder().encode(watch).write(to: file(watch.id), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
++  private static func object(_ text: String) throws -> [String: Any] {
++    guard let result = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw Failure.invalid }
++    return result
++  }
++  private static func encode(_ value: Any) throws -> String { String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self) }
++  private enum Failure: Error { case invalid }
++  private static func terminal(_ status: String) -> Bool { ["completed", "failed", "killed"].contains(status) }
++  private static func connection(_ watch: Watch) throws -> (HandyBackgroundDelivery, [String: Any], URLSession) {
++    let worker = HandyBackgroundDelivery()
++    let profile = try worker.profile(watch.originId)
++    guard profile["origin"] as? String == watch.origin else { throw Failure.invalid }
++    let config = URLSessionConfiguration.ephemeral
++    config.httpCookieStorage = nil; config.urlCredentialStorage = nil; config.urlCache = nil
++    config.timeoutIntervalForResource = 20
++    return (worker, profile, URLSession(configuration: config, delegate: worker, delegateQueue: nil))
++  }
++  private static func path(_ id: String) -> String { id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "" }
++  private static func clean(_ text: String, _ profile: [String: Any]) -> String {
++    var result = text
++    for header in profile["headers"] as? [[String: Any]] ?? [] {
++      guard let secret = header["value"] as? String, !secret.isEmpty else { continue }
++      let json = (try? JSONSerialization.data(withJSONObject: [secret])).flatMap { String(data: $0, encoding: .utf8) }
++      let escaped = json.map { String($0.dropFirst(2).dropLast(2)) } ?? secret
++      for value in [secret, escaped, secret.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? secret] where !value.isEmpty {
++        result = result.replacingOccurrences(of: value, with: "[secret]")
++      }
++    }
++    return result
++  }
++  // Called before a side-effecting send, so acceptance can be bound after a crash-safe claim.
++  static func prepare(id: String, payload: [String: Any], prompt: String, expectedOrigin: String) async throws {
++    if FileManager.default.fileExists(atPath: try file(id).path) {
++      let previous = try read(id)
++      // A confirmed accepted watch must never be reused to send the same source again.
++      guard previous.status == "preparing", previous.originId == payload["originId"] as? String else { throw Failure.invalid }
++    }
++    guard let originId = payload["originId"] as? String, let target = payload["session"] as? [String: Any],
++          let sessionId = target["id"] as? String, let workspace = target["workspaceId"] as? String else { throw Failure.invalid }
++    let worker = HandyBackgroundDelivery()
++    let profile = try worker.profile(originId)
++    guard let origin = profile["origin"] as? String, origin == expectedOrigin else { throw Failure.invalid }
++    var safeTarget = target
++    if let label = target["label"] as? String { safeTarget["label"] = String(clean(label, profile).prefix(160)) }
++    var watch = Watch(id: id, originId: originId, origin: origin, target: try encode(safeTarget), prompt: prompt, baseline: [], createdAt: Date())
++    let (_, _, session) = try connection(watch)
++    defer { session.invalidateAndCancel() }
++    if let preview = try await worker.request(session, profile, "/api/sessions/\(path(sessionId))/conversation-preview?limit=100") as? [String: Any],
++       preview["session_id"] as? String == sessionId, preview["workspace_id"] as? String == workspace {
++      watch.baseline = (preview["messages"] as? [[String: Any]] ?? []).compactMap { $0["execution_process_id"] as? String }
++    } else { throw Failure.invalid }
++    try save(watch)
++    install()
++  }
++  static func accepted(id: String, process: String?, queuedPrompt: String?) async throws {
++    var watch = try read(id)
++    guard watch.status == "preparing" else { return }
++    watch.processId = process
++    if let queuedPrompt { watch.prompt = queuedPrompt; watch.status = "queued" }
++    else { watch.status = process == nil ? "unverified" : "running" }
++    try save(watch)
++    resume(userInitiated: true)
++    try? await publish()
++  }
++  static func prepareJSON(_ text: String) async throws {
++    let value = try object(text)
++    guard let id = value["id"] as? String, let payload = value["payload"] as? [String: Any], let prompt = value["prompt"] as? String, let origin = value["origin"] as? String else { throw Failure.invalid }
++    try await prepare(id: id, payload: payload, prompt: prompt, expectedOrigin: origin)
++  }
++  static func acceptJSON(_ text: String) async throws {
++    let value = try object(text)
++    guard let id = value["id"] as? String else { throw Failure.invalid }
++    try await accepted(id: id, process: value["processId"] as? String, queuedPrompt: value["queuedPrompt"] as? String)
++  }
++  static func install() {
++    guard observers.isEmpty else { return }
++    observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in Task { @MainActor in suspended = false; endBackground(); resume() } })
++    observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in Task { @MainActor in beginBackground() } })
++  }
++  private static func endBackground() {
++    expiry?.cancel(); expiry = nil
++    if background != .invalid { UIApplication.shared.endBackgroundTask(background); background = .invalid }
++  }
++  private static func stop() {
++    suspended = true
++    generation = UUID()
++    tasks.values.forEach { $0.cancel() }; tasks.removeAll()
++    endBackground()
++  }
++  private static func beginBackground() {
++    guard background == .invalid, !tasks.isEmpty else { return }
++    background = UIApplication.shared.beginBackgroundTask(withName: "Handy agent replies") { Task { @MainActor in stop() } }
++    if background == .invalid { stop(); return }
++    expiry = Task { @MainActor in
++      do { try await Task.sleep(nanoseconds: 25_000_000_000); stop() } catch { }
++    }
++  }
++  static func resume(userInitiated: Bool = false) {
++    install()
++    if userInitiated { suspended = false }
++    guard !suspended else { return }
++    for watch in (try? all()) ?? [] where watch.status != "preparing" && watch.status != "unverified" && (!terminal(watch.status) || !watch.notified) {
++      guard tasks[watch.id] == nil else { continue }
++      let id = watch.id
++      let started = generation
++      tasks[id] = Task { @MainActor in
++        await monitor(id)
++        guard generation == started else { return }
++        tasks.removeValue(forKey: id)
++        if tasks.isEmpty { endBackground() }
++      }
++    }
++    if UIApplication.shared.applicationState != .active { beginBackground() }
++  }
++  private static func monitor(_ id: String) async {
++    var socket: Task<Void, Never>?
++    defer { socket?.cancel() }
++    while !Task.isCancelled {
++      do {
++        var watch = try read(id)
++        if terminal(watch.status), watch.notified { return }
++        let (worker, profile, session) = try connection(watch)
++        defer { session.invalidateAndCancel() }
++        let target = try object(watch.target)
++        guard let sessionId = target["id"] as? String, let workspace = target["workspaceId"] as? String else { return }
++        let preview = try await worker.request(session, profile, "/api/sessions/\(path(sessionId))/conversation-preview?limit=100") as? [String: Any]
++        try Task.checkCancellation()
++        guard preview?["session_id"] as? String == sessionId, preview?["workspace_id"] as? String == workspace else { throw Failure.invalid }
++        let messages = preview?["messages"] as? [[String: Any]] ?? []
++        if watch.processId == nil, watch.status == "queued" {
++          // Never equate idle/empty queue with completion. Match only a unique,
++          // newly observed USER message with exact queued text and a later time.
++          let matches = messages.filter { message in
++            guard message["role"] as? String == "user", message["content"] as? String == watch.prompt,
++                  let process = message["execution_process_id"] as? String, !watch.baseline.contains(process),
++                  let date = message["created_at"] as? String else { return false }
++            let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
++            let created = formatter.date(from: date) ?? ISO8601DateFormatter().date(from: date)
++            return (created ?? .distantPast) >= watch.createdAt
++          }
++          let ids = Set(matches.compactMap { $0["execution_process_id"] as? String })
++          if ids.count == 1, let process = ids.first,
++             !(try all()).contains(where: { other in
++               let sameSession = (try? object(other.target)["id"] as? String) == sessionId
++               return other.id != id && other.originId == watch.originId && (other.processId == process || (other.status == "queued" && sameSession && other.prompt == watch.prompt))
++             }) {
++            watch.processId = process; watch.status = "running"; try save(watch)
++          }
++        }
++        if let process = watch.processId {
++          guard let state = try await worker.request(session, profile, "/api/execution-processes/\(path(process))") as? [String: Any],
++                state["id"] as? String == process, state["session_id"] as? String == sessionId,
++                state["run_reason"] as? String == "codingagent", let status = state["status"] as? String,
++                ["running", "completed", "failed", "killed"].contains(status) else { throw Failure.invalid }
++          try Task.checkCancellation()
++          if socket == nil, status == "running" {
++            socket = Task { @MainActor in
++              while !Task.isCancelled {
++                await stream(id, process: process)
++                do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
++              }
++            }
++          }
++          // Reload after awaits: a stream callback may have saved newer text/unread state.
++          watch = try read(id)
++          watch.status = status
++          let response = messages.last(where: { $0["role"] as? String == "assistant" && $0["execution_process_id"] as? String == process })?["content"] as? String
++          if let response, terminal(status) || watch.excerpt.isEmpty {
++            updateText(&watch, clean(response, profile))
++          }
++          if terminal(status) { watch.summaryAttempts += 1; socket?.cancel(); socket = nil }
++          try save(watch)
++          try? await publish()
++          if terminal(status), response != nil || watch.summaryAttempts >= 5 { try await notify(id); return }
++        }
++      } catch { /* Keep durable watch. Never surface raw server/transport/credential errors. */ }
++      do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
++    }
++  }
++  private static func updateText(_ watch: inout Watch, _ text: String) {
++    let next = String(text.prefix(3000))
++    if watch.excerpt != next { watch.unread = true; watch.excerpt = next }
++    let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
++    var links: [String] = []
++    for match in detector?.matches(in: text, range: NSRange(text.startIndex..., in: text)) ?? [] {
++      guard let url = match.url, ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
++            url.host != nil, url.user == nil, url.password == nil, url.absoluteString.utf8.count <= 500,
++            !url.absoluteString.contains("[secret]"), !url.absoluteString.lowercased().contains("%5bsecret%5d"), !links.contains(url.absoluteString) else { continue }
++      links.append(url.absoluteString)
++      if links.count == 3 { break }
++    }
++    watch.links = links
++  }
++  private static func stream(_ id: String, process: String) async {
++    do {
++      let watch = try read(id)
++      let (_, profile, session) = try connection(watch)
++      defer { session.invalidateAndCancel() }
++      guard var url = URLComponents(string: watch.origin) else { return }
++      url.scheme = url.scheme == "https" ? "wss" : "ws"
++      url.percentEncodedPath = "/api/execution-processes/\(path(process))/normalized-logs/ws"
++      guard let destination = url.url else { return }
++      var request = URLRequest(url: destination)
++      request.httpShouldHandleCookies = false
++      for header in profile["headers"] as? [[String: Any]] ?? [] {
++        guard let name = header["name"] as? String, let value = header["value"] as? String, !value.contains("\r"), !value.contains("\n") else { return }
++        request.setValue(value, forHTTPHeaderField: name)
++      }
++      let socket = session.webSocketTask(with: request)
++      socket.maximumMessageSize = 1_048_576
++      socket.resume()
++      defer { socket.cancel(with: .goingAway, reason: nil) }
++      var entries: [Int: String] = [:]
++      var last = Date.distantPast
++      var delayed: Task<Void, Never>?
++      defer { delayed?.cancel() }
++      try await withTaskCancellationHandler(operation: {
++        while !Task.isCancelled {
++          let packet = try await socket.receive()
++          try Task.checkCancellation()
++          let bytes: Data
++          switch packet { case .data(let data): bytes = data; case .string(let text): bytes = Data(text.utf8); @unknown default: continue }
++          guard let envelope = try JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { continue }
++          if envelope["finished"] as? Bool == true {
++            if let index = entries.keys.max(), let text = entries[index] { try await applyStreamText(id, process: process, text: text) }
++            return
++          }
++          // Ready/finished/socket-close never establish an execution outcome.
++          for operation in envelope["JsonPatch"] as? [[String: Any]] ?? [] {
++            let parts = (operation["path"] as? String ?? "").split(separator: "/")
++            guard parts.count == 2, parts[0] == "entries", let index = Int(parts[1]) else { continue }
++            if operation["op"] as? String == "remove" { entries.removeValue(forKey: index); continue }
++            guard ["add", "replace"].contains(operation["op"] as? String ?? ""), let value = operation["value"] as? [String: Any],
++                  value["type"] as? String == "NORMALIZED_ENTRY", let content = value["content"] as? [String: Any] else { continue }
++            if (content["entry_type"] as? [String: Any])?["type"] as? String == "assistant_message", let text = content["content"] as? String {
++              entries[index] = String(clean(text, profile).prefix(4096))
++            } else { entries.removeValue(forKey: index) }
++          }
++          // Bound retained assistant history, and coalesce ActivityKit writes.
++          if entries.count > 64 { for key in entries.keys.sorted().prefix(entries.count - 64) { entries.removeValue(forKey: key) } }
++          guard let index = entries.keys.max(), let text = entries[index] else { continue }
++          delayed?.cancel()
++          let remaining = max(0, 1 - Date().timeIntervalSince(last))
++          if remaining == 0 { try await applyStreamText(id, process: process, text: text); last = Date() }
++          else {
++            delayed = Task { @MainActor in
++              do {
++                try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
++                try await applyStreamText(id, process: process, text: text); last = Date()
++              } catch { }
++            }
++          }
++        }
++      }, onCancel: { socket.cancel(with: .goingAway, reason: nil) })
++    } catch { /* Polling/reconciliation remains authoritative after stream disconnect. */ }
++  }
++  private static func applyStreamText(_ id: String, process: String, text: String) async throws {
++    try Task.checkCancellation()
++    var current = try read(id)
++    guard !terminal(current.status), current.processId == process, current.excerpt != String(text.prefix(3000)) else { return }
++    updateText(&current, text); try save(current)
++    try? await publish()
++  }
++  static func snapshots() throws -> [[String: Any]] {
++    try all().filter { $0.status != "preparing" }.map { watch in
++      let target = try object(watch.target)
++      return ["id": watch.id, "label": String((target["label"] as? String ?? "Agent").prefix(80)), "status": watch.status == "queued" ? "queued · matching unverified" : watch.status,
++              "excerpt": String(watch.excerpt.prefix(280)), "links": watch.links, "unread": watch.unread]
++    }
++  }
++  private static func publish() async throws {
++    if #available(iOS 17.0, *) { try await HandyActivityCoordinator.publishReplies() }
++  }
++  static func markRead(_ id: String) throws { var watch = try read(id); watch.unread = false; try save(watch) }
++  static func reply(_ id: String) async throws {
++    let watch = try read(id)
++    let target = try object(watch.target)
++    let payload: [String: Any] = ["type": "vd-agent", "originId": watch.originId, "prefix": "", "session": target]
++    let actionId = UUID().uuidString
++    let rows: [[String: Any]] = [["id": actionId, "title": "Reply to agent", "payload": payload]]
++    let capture: [String: Any] = ["actionId": actionId, "presetId": "", "title": target["label"] as? String ?? "Agent reply", "actions": try encode(rows), "backgroundRequest": true, "workspaceBrowserUrl": "\(watch.origin)/workspaces/\(path(target["workspaceId"] as? String ?? ""))"]
++    if #available(iOS 17.0, *) { _ = try await HandyNoteCapture.post(target: "handy-note-capture-v1:" + encode(capture)) }
++  }
++  private static func notify(_ id: String) async throws {
++    var watch = try read(id)
++    guard !watch.notified, terminal(watch.status) else { return }
++    let target = try object(watch.target)
++    let worker = HandyBackgroundDelivery()
++    let profile = try worker.profile(watch.originId)
++    guard profile["origin"] as? String == watch.origin else { throw Failure.invalid }
++    let payload: [String: Any] = ["type": "vd-agent", "originId": watch.originId, "prefix": "", "session": target]
++    let actionId = "reply-\(id)"
++    let rows: [[String: Any]] = [["id": actionId, "title": "Reply", "payload": payload]]
++    let notificationId = "handy-agent-reply-" + SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
++    let data: [String: String] = ["captureActionId": actionId, "actions": try encode(rows), "backgroundRequest": "1", "submissionId": id + "-reply", "workspaceBrowserUrl": "\(watch.origin)/workspaces/\(path(target["workspaceId"] as? String ?? ""))"]
++    let center = UNUserNotificationCenter.current()
++    var categories = await center.notificationCategories()
++    categories.insert(UNNotificationCategory(identifier: "handy-agent-reply-v1", actions: [UNTextInputNotificationAction(identifier: "handy-input-submit", title: "Reply", options: [], textInputButtonTitle: "Send", textInputPlaceholder: "Reply to this session")], intentIdentifiers: [], options: []))
++    center.setNotificationCategories(categories)
++    let content = UNMutableNotificationContent()
++    let outcome = watch.status == "completed" ? "Agent replied" : watch.status == "failed" ? "Agent failed" : "Agent stopped"
++    content.title = String(clean(target["label"] as? String ?? "VD agent", profile).prefix(80)) + " · " + outcome
++    content.body = String(watch.excerpt.prefix(240)).isEmpty ? outcome : String(watch.excerpt.prefix(240))
++    content.categoryIdentifier = "handy-agent-reply-v1"
++    content.userInfo = ["__notifee_notification": ["id": notificationId, "data": data, "ios": ["categoryId": content.categoryIdentifier]]]
++    // Stable ID plus durable receipt prevents normal relaunch/reconnect duplicates.
++    // If killed between add and save, delivered/pending IDs reconcile the receipt.
++    let delivered = await center.deliveredNotifications()
++    if !delivered.contains(where: { $0.request.identifier == notificationId }) {
++      try await center.add(UNNotificationRequest(identifier: notificationId, content: content, trigger: nil))
++    }
++    watch = try read(id); watch.notified = true; watch.unread = true; try save(watch)
++    try? await publish()
++  }
++}
 diff --git a/ios/HandyBackgroundDelivery.swift b/ios/HandyBackgroundDelivery.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..e093cb9da7519dedc78408c61864e13c3b19d8c4
+index 0000000000000000000000000000000000000000..b592719e6e6dcac1047f7c6092b9c7fa7d2283fa
 --- /dev/null
 +++ b/ios/HandyBackgroundDelivery.swift
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,283 @@
 +import Foundation
 +import Security
 +import CryptoKit
 +import UserNotifications
++import UIKit
 +
 +// Called by the pinned Notifee callback before React event delivery. This class
 +// lives in the host, not the widget extension; credentials never enter activities.
 +@objc(HandyBackgroundDelivery)
-+@available(iOSApplicationExtension, unavailable)
 +final class HandyBackgroundDelivery: NSObject, URLSessionTaskDelegate {
 +  private static let gate = NSLock()
 +  private enum Failure: Error { case retained(String) }
@@ -368,6 +785,7 @@ index 0000000000000000000000000000000000000000..e093cb9da7519dedc78408c61864e13c
 +  }
 +
 +  @objc(handleResponse:notification:completion:)
++  @available(iOSApplicationExtension, unavailable)
 +  static func handle(response: UNNotificationResponse, notification: [String: Any], completion: @escaping () -> Void) -> Bool {
 +    if HandyWorkspaceSearch.handle(response: response, notification: notification, completion: completion) { return true }
 +    guard let data = notification["data"] as? [String: Any] else { return false }
@@ -412,7 +830,7 @@ index 0000000000000000000000000000000000000000..e093cb9da7519dedc78408c61864e13c
 +      if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
 +        message = "Tap this notification to continue in the editor. No empty request was sent."
 +      } else {
-+        do { message = try await HandyBackgroundDelivery().deliver(payload, text); success = true }
++        do { message = try await withDeliveryRuntime { try await HandyBackgroundDelivery().deliver(payload, text, id) }; success = true }
 +        catch Failure.retained(let safeMessage) { message = safeMessage }
 +        catch { /* Never display errors/server bodies that could contain headers. */ }
 +      }
@@ -423,6 +841,20 @@ index 0000000000000000000000000000000000000000..e093cb9da7519dedc78408c61864e13c
 +      feedback(response, notification, actionId, text, id, message, success, completion)
 +    }
 +    return true
++  }
++
++  @MainActor
++  @available(iOSApplicationExtension, unavailable)
++  private static func withDeliveryRuntime(_ operation: @escaping () async throws -> String) async throws -> String {
++    var identifier = UIBackgroundTaskIdentifier.invalid
++    var task: Task<String, Error>?
++    func finish() {
++      if identifier != .invalid { UIApplication.shared.endBackgroundTask(identifier); identifier = .invalid }
++    }
++    identifier = UIApplication.shared.beginBackgroundTask(withName: "Handy message delivery") { Task { @MainActor in task?.cancel(); finish() } }
++    defer { finish() }
++    task = Task { try Task.checkCancellation(); return try await operation() }
++    return try await task!.value
 +  }
 +
 +  private static func feedback(_ response: UNNotificationResponse, _ notification: [String: Any],
@@ -503,7 +935,8 @@ index 0000000000000000000000000000000000000000..e093cb9da7519dedc78408c61864e13c
 +    return result
 +  }
 +
-+  private func deliver(_ payload: [String: Any], _ text: String) async throws -> String {
++  @available(iOSApplicationExtension, unavailable)
++  private func deliver(_ payload: [String: Any], _ text: String, _ submissionId: String) async throws -> String {
 +    guard let originId = payload["originId"] as? String else { throw Failure.retained("Choose a configured connection in the editor.") }
 +    let connection = try profile(originId)
 +    let configuration = URLSessionConfiguration.ephemeral
@@ -550,15 +983,78 @@ index 0000000000000000000000000000000000000000..e093cb9da7519dedc78408c61864e13c
 +      }
 +      let contents: [String: Any] = ["message": prompt, "executor_config": executorConfig]
 +      let body = try JSONSerialization.data(withJSONObject: contents)
++      try await HandyAgentReplies.prepare(id: submissionId, payload: payload, prompt: prompt, expectedOrigin: connection["origin"] as? String ?? "")
++      guard let rechecked = try await request(session, connection, "\(path)/queue") as? [String: Any], rechecked["status"] as? String == "empty" else {
++        throw Failure.retained("Queue changed while preparing reply tracking. Review in the editor; no overwrite was attempted.")
++      }
 +      _ = try await request(session, connection, "\(path)/queue", "POST", body, "application/json")
++      try await HandyAgentReplies.accepted(id: submissionId, process: nil, queuedPrompt: prompt)
 +      return "Prompt queued for the busy agent."
 +    }
 +    let contents: [String: Any] = ["prompt": prompt, "executor_config": executorConfig,
 +      "retry_process_id": NSNull(), "force_when_dirty": NSNull(), "perform_git_reset": NSNull()]
 +    let body = try JSONSerialization.data(withJSONObject: contents)
-+    _ = try await request(session, connection, "\(path)/follow-up", "POST", body, "application/json")
++    try await HandyAgentReplies.prepare(id: submissionId, payload: payload, prompt: prompt, expectedOrigin: connection["origin"] as? String ?? "")
++    let process = try await request(session, connection, "\(path)/follow-up", "POST", body, "application/json") as? [String: Any]
++    let processId = process?["session_id"] as? String == id ? process?["id"] as? String : nil
++    try await HandyAgentReplies.accepted(id: submissionId, process: processId, queuedPrompt: nil)
 +    return "Prompt sent to the locked session."
 +  }
++}
+diff --git a/ios/HandyHostServices.swift b/ios/HandyHostServices.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..23342049cefb36716ad671b4e3366b6aa0f469c2
+--- /dev/null
++++ b/ios/HandyHostServices.swift
+@@ -0,0 +1,49 @@
++import Foundation
++
++// Expo's generated module registry also references WidgetsModule in extension
++// builds. Keep that facade extension-safe; resolve host-only services at runtime
++// just as the LiveActivityIntent resolves its host notification handler.
++@objc(HandyHostServiceProtocol)
++protocol HandyHostServiceProtocol {
++  static func handle(_ operation: String, payload: String, completion: @escaping (String?, String?) -> Void)
++}
++
++enum HandyHostServiceBridge {
++  static func call(_ operation: String, _ payload: String = "") async throws -> String {
++    guard !Bundle.main.bundlePath.hasSuffix(".appex"),
++          let service = NSClassFromString("HandyHostServices") as? HandyHostServiceProtocol.Type else {
++      throw NSError(domain: "HandyHostServices", code: 1, userInfo: [NSLocalizedDescriptionKey: "This operation requires the Handy Actions host app."])
++    }
++    return try await withCheckedThrowingContinuation { continuation in
++      service.handle(operation, payload: payload) { result, error in
++        if let error { continuation.resume(throwing: NSError(domain: "HandyHostServices", code: 2, userInfo: [NSLocalizedDescriptionKey: error])) }
++        else { continuation.resume(returning: result ?? "") }
++      }
++    }
++  }
++}
++
++@objc(HandyHostServices)
++@available(iOSApplicationExtension, unavailable)
++final class HandyHostServices: NSObject, HandyHostServiceProtocol {
++  @objc static func handle(_ operation: String, payload: String, completion: @escaping (String?, String?) -> Void) {
++    Task { @MainActor in
++      do {
++        switch operation {
++        case "resume": HandyAgentReplies.resume(); completion("", nil)
++        case "prepare-reply": try await HandyAgentReplies.prepareJSON(payload); completion("", nil)
++        case "accept-reply": try await HandyAgentReplies.acceptJSON(payload); completion("", nil)
++        case "sync":
++          guard #available(iOS 16.2, *), let value = try JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any], let configuration = value["configuration"] as? String else { throw Failure.invalid }
++          completion(try await HandyActivityCoordinator.sync(configuration, renew: value["renew"] as? Bool == true), nil)
++        case "search":
++          guard #available(iOS 17.0, *), let value = try JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any], let action = value["action"] as? String, let presetId = value["presetId"] as? String else { throw Failure.invalid }
++          completion(try await HandyWorkspaceSearch.begin(action: action, presetId: presetId, query: value["query"] as? String), nil)
++        default: throw Failure.invalid
++        }
++      } catch let error as HandyActivityCoordinator.Failure { completion(nil, error.message) }
++      catch { completion(nil, "Could not complete the host operation. Your saved draft/watch is retained; review before retrying.") }
++    }
++  }
++  private enum Failure: Error { case invalid }
 +}
 diff --git a/ios/HandyNoteInbox.swift b/ios/HandyNoteInbox.swift
 new file mode 100644
@@ -607,10 +1103,10 @@ index 0000000000000000000000000000000000000000..b672a0c4cf60367976f03e0ca7bcde44
 +}
 diff --git a/ios/HandyWorkspaceSearch.swift b/ios/HandyWorkspaceSearch.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..f3fa342d8e8f2f26a40514cebda62f7a0ca89ba2
+index 0000000000000000000000000000000000000000..28ddb7f38a19bd9bb6cea7ccf26ee59be0d4b406
 --- /dev/null
 +++ b/ios/HandyWorkspaceSearch.swift
-@@ -0,0 +1,366 @@
+@@ -0,0 +1,367 @@
 +import ActivityKit
 +import Foundation
 +import UIKit
@@ -683,6 +1179,7 @@ index 0000000000000000000000000000000000000000..f3fa342d8e8f2f26a40514cebda62f7a
 +  static func handleTarget(_ target: String, completion: @escaping (String?) -> Void) {
 +    Task { @MainActor in
 +      guard #available(iOS 17.0, *) else { completion("Requires iOS 17 or later."); return }
++      HandyAgentReplies.resume(userInitiated: true)
 +      do {
 +        try await withRuntime {
 +          if target.hasPrefix(HandyActivityCoordinator.prefix) { try await HandyActivityCoordinator.perform(target) }
@@ -1135,7 +1632,7 @@ diff --git a/ios/Widgets/Buttons.swift b/ios/Widgets/Buttons.swift
 index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..a99bb834446a904b1e64e003816adadd1cc2eb81 100644
 --- a/ios/Widgets/Buttons.swift
 +++ b/ios/Widgets/Buttons.swift
-@@ -16,5 +16,12 @@ final class ButtonProps: ExpoUI.ButtonProps {
+@@ -16,5 +16,12 @@ struct WidgetButtonView: ExpoSwiftUI.View {
 +  @ViewBuilder
    var body: some View {
 -    SwiftUI.Button(
@@ -1157,25 +1654,36 @@ index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..a99bb834446a904b1e64e003816adadd
    }
  }
 diff --git a/ios/WidgetsModule.swift b/ios/WidgetsModule.swift
-index b1b4295e22726e6fe501aa5e514b56061dea57a1..24506769bf151d2539c10eea560ff32a2c127d7a 100644
+index b1b4295e22726e6fe501aa5e514b56061dea57a1..2bc3dfba8565a49fd77224366da568fef5673aab 100644
 --- a/ios/WidgetsModule.swift
 +++ b/ios/WidgetsModule.swift
-@@ -12,2 +12,3 @@ let onPushToStartTokenReceived = "onExpoWidgetsPushToStartTokenReceived"
-+@available(iOSApplicationExtension, unavailable)
- public final class WidgetsModule: Module {
-   var pushToStartTokenObserverTask: Task<Void, Never>?
-@@ -17,6 +18,32 @@ public final class WidgetsModule: Module {
+@@ -17,6 +17,47 @@ public final class WidgetsModule: Module {
  
      Events(onPushToStartTokenReceived, onTokenReceived, onUserInteraction)
  
++    OnCreate { Task { _ = try? await HandyHostServiceBridge.call("resume") } }
++    AsyncFunction("prepareHandyReplyWatch") { (text: String) async throws in
++      _ = try await HandyHostServiceBridge.call("prepare-reply", text)
++    }
++    AsyncFunction("acceptHandyReplyWatch") { (text: String) async throws in
++      _ = try await HandyHostServiceBridge.call("accept-reply", text)
++    }
++    AsyncFunction("resumeHandyReplyWatches") { () async in
++      _ = try? await HandyHostServiceBridge.call("resume")
++    }
++
 +    AsyncFunction("syncHandyActivity") { (configuration: String, renew: Bool) async throws -> String in
 +      guard #available(iOS 16.2, *) else { throw LiveActivitiesNotSupportedException() }
-+      return try await HandyActivityCoordinator.sync(configuration, renew: renew)
++      let value = String(decoding: try JSONSerialization.data(withJSONObject: ["configuration": configuration, "renew": renew]), as: UTF8.self)
++      return try await HandyHostServiceBridge.call("sync", value)
 +    }
 +
 +    AsyncFunction("beginHandyWorkspaceSearch") { (action: String, presetId: String, query: String?) async throws -> String in
 +      guard #available(iOS 17.0, *) else { throw LiveActivitiesNotSupportedException() }
-+      return try await HandyWorkspaceSearch.begin(action: action, presetId: presetId, query: query)
++      var values: [String: Any] = ["action": action, "presetId": presetId]
++      if let query { values["query"] = query }
++      let value = String(decoding: try JSONSerialization.data(withJSONObject: values), as: UTF8.self)
++      return try await HandyHostServiceBridge.call("search", value)
 +    }
 +
 +    AsyncFunction("readHandyNoteInbox") { () -> [[String: Any]] in

@@ -29,7 +29,7 @@ export function createVdClient(request: ApiRequest, originId: string) {
     sessions: (id: string) => api<Session[]>(`/api/sessions?workspace_id=${encodeURIComponent(id)}`),
     tags: () => api<Tag[]>('/api/tags'),
     queue,
-    async send(target: AgentSession, prompt: string, edit?: { operation: 'append' | 'overwrite'; expected: QueueStatus }) {
+    async send(target: AgentSession, prompt: string, edit?: { operation: 'append' | 'overwrite'; expected: QueueStatus }, beforeSend?: (prompt: string) => Promise<void>) {
       if (!prompt.trim()) throw new Error('Enter a prompt first.');
       const path = `/api/sessions/${encodeURIComponent(target.id)}`;
       const session = await api<Session>(path);
@@ -46,11 +46,14 @@ export function createVdClient(request: ApiRequest, originId: string) {
         const latest=await queue(target.id);
         if(JSON.stringify(latest)!==JSON.stringify(current))throw new QueueChanged();
         const message = queued && edit?.operation === 'append' ? `${current.message.data.message}\n${prompt}` : prompt;
+        await beforeSend?.(message);
+        if (beforeSend && JSON.stringify(await queue(target.id)) !== JSON.stringify(current)) throw new QueueChanged();
         await api(`${path}/queue`, { method: 'POST', contentType: 'application/json', body: JSON.stringify({ message, executor_config: { executor: session.executor } }) });
         return { kind: 'queued' as const };
       }
-      await api(`${path}/follow-up`, { method: 'POST', contentType: 'application/json', body: JSON.stringify({ prompt, executor_config: { executor: session.executor }, retry_process_id: null, force_when_dirty: null, perform_git_reset: null }) });
-      return { kind: 'started' as const };
+      await beforeSend?.(prompt);
+      const process = await api<{id?:string;session_id?:string}>(`${path}/follow-up`, { method: 'POST', contentType: 'application/json', body: JSON.stringify({ prompt, executor_config: { executor: session.executor }, retry_process_id: null, force_when_dirty: null, perform_git_reset: null }) });
+      return { kind: 'started' as const, ...(typeof process?.id === 'string' && process.session_id === target.id ? {processId:process.id} : {}) };
     },
   };
 }

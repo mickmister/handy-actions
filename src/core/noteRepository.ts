@@ -1,4 +1,5 @@
 import { makeId, type HandyAction } from './handyModel.ts';
+import { acceptedAgentSendKey } from './agentSendReceipts.ts';
 
 export type AgentHandoff = {
   submissionId: string; actionName: string; originId: string; sessionId: string;
@@ -8,8 +9,8 @@ export type HandyNote = {
   id: string; text: string; createdAt: string; updatedAt?: string;
   status?: 'unaddressed' | 'completed'; completedAt?: string; handoff?: AgentHandoff;
 };
-export type PendingNote = { id: string; action: HandyAction; text: string; createdAt: string; attempted?: boolean; presetId?:string; sourceNoteId?:string };
-type HandoffReceipt = { sourceNoteId: string; handoff: AgentHandoff; applied?: boolean };
+export type PendingNote = { id: string; action: HandyAction; text: string; createdAt: string; attempted?: boolean; presetId?:string; sourceNoteId?:string; sourceNoteIds?: string[] };
+type HandoffReceipt = { sourceNoteId?: string; sourceNoteIds?: string[]; handoff: AgentHandoff; applied?: boolean };
 type NoteStorage = {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
@@ -39,16 +40,15 @@ export function createNoteRepository(storage: NoteStorage) {
   }
   async function applyHandoff(receipt: HandoffReceipt) {
     if (receipt.applied) return;
-    const notes = await loadNotes();
-    const note = notes.find(entry => entry.id === receipt.sourceNoteId);
-    if (!note) throw new Error('Source note is missing; handoff receipt retained.');
+    const ids = [...new Set(receipt.sourceNoteIds ?? (receipt.sourceNoteId ? [receipt.sourceNoteId] : []))];
+    const notes = ids.length ? await loadNotes() : [];
+    if (ids.some(id => !notes.some(note => note.id === id))) throw new Error('Source note is missing; handoff receipt retained.');
     // A replay must not re-complete a note explicitly reopened after this handoff.
-    if (note.handoff?.submissionId !== receipt.handoff.submissionId &&
-      (!note.handoff || Date.parse(note.handoff.acceptedAt) < Date.parse(receipt.handoff.acceptedAt))) {
-      await storage.setItem(NOTES_KEY, JSON.stringify(notes.map(entry => entry.id === note.id ? {
-        ...entry, status: 'completed', completedAt: receipt.handoff.acceptedAt, handoff: receipt.handoff,
-      } : entry)));
-    }
+    if (ids.length) await storage.setItem(NOTES_KEY, JSON.stringify(notes.map(note =>
+      ids.includes(note.id) && note.handoff?.submissionId !== receipt.handoff.submissionId &&
+      (!note.handoff || Date.parse(note.handoff.acceptedAt) < Date.parse(receipt.handoff.acceptedAt))
+        ? {...note, status: 'completed', completedAt: receipt.handoff.acceptedAt, handoff: receipt.handoff}
+        : note)));
     await finishSubmission(receipt.handoff.submissionId);
     await storage.setItem(HANDOFF_PREFIX + receipt.handoff.submissionId, JSON.stringify({...receipt, applied:true}));
   }
@@ -85,13 +85,14 @@ export function createNoteRepository(storage: NoteStorage) {
         })));
       });
     },
-    confirmAgentHandoff(submissionId: string, sourceNoteId: string, action: HandyAction, kind: 'started' | 'queued'): Promise<void> {
+    confirmAgentHandoff(submissionId: string, source: string | string[], action: HandyAction, kind: 'started' | 'queued'): Promise<void> {
       return serialized(async () => {
         if (action.payload.type !== 'vd-agent' || !action.payload.session) throw new Error('A verified agent session is required.');
         const existing = await storage.getItem(HANDOFF_PREFIX + submissionId);
-        const previous = Date.parse((await loadNotes()).find(note=>note.id===sourceNoteId)?.handoff?.acceptedAt ?? '');
+        const sourceNoteIds = [...new Set(typeof source === 'string' ? [source] : source)];
+        const previous = Math.max(0, ...(await loadNotes()).filter(note=>sourceNoteIds.includes(note.id)).map(note=>Date.parse(note.handoff?.acceptedAt ?? '') || 0));
         const acceptedAt = new Date(Math.max(Date.now(),Number.isFinite(previous)?previous+1:0)).toISOString();
-        const receipt: HandoffReceipt = existing ? JSON.parse(existing) : {sourceNoteId,handoff:{
+        const receipt: HandoffReceipt = existing ? JSON.parse(existing) : {sourceNoteIds,handoff:{
           submissionId, actionName:action.name,originId:action.payload.originId,
           sessionId:action.payload.session.id,sessionLabel:action.payload.session.label,kind,acceptedAt,
         }};
@@ -109,9 +110,12 @@ export function createNoteRepository(storage: NoteStorage) {
         await storage.setItem(NOTES_KEY, JSON.stringify([{ id, text, createdAt }, ...notes]));
       });
     },
-    queueNote(action: HandyAction, text: string, id = makeId('submission'), presetId?:string, sourceNoteId?:string): Promise<PendingNote | undefined> {
+    queueNote(action: HandyAction, text: string, id = makeId('submission'), presetId?:string, sourceNoteId?:string, sourceNoteIds?:string[]): Promise<PendingNote | undefined> {
       return serialized(async () => {
         if (!text.trim()) throw new Error('Enter a note first.');
+        // Acceptance may be journaled before source completion/native watch binding.
+        // Never permit a resend during that reconciliation window.
+        if (await storage.getItem(acceptedAgentSendKey(id))) return undefined;
         const receipt = await storage.getItem(HANDOFF_PREFIX + id);
         if (receipt) { await applyHandoff(JSON.parse(receipt)); return undefined; }
         if (await noteCompleted(id)) return undefined;
@@ -119,7 +123,8 @@ export function createNoteRepository(storage: NoteStorage) {
         const old:PendingNote|undefined=previous?JSON.parse(previous):undefined;
         const contextPresetId=presetId??old?.presetId;
         const source = sourceNoteId ?? old?.sourceNoteId;
-        const pending: PendingNote = { id, action, text, createdAt: old?.createdAt??new Date().toISOString(), ...(old ? { attempted: old.attempted === true } : {}),...(contextPresetId?{presetId:contextPresetId}:{}),...(source?{sourceNoteId:source}:{}) };
+        const sources = sourceNoteIds ?? old?.sourceNoteIds;
+        const pending: PendingNote = { id, action, text, createdAt: old?.createdAt??new Date().toISOString(), ...(old ? { attempted: old.attempted === true } : {}),...(contextPresetId?{presetId:contextPresetId}:{}),...(source?{sourceNoteId:source}:{}), ...(sources?.length?{sourceNoteIds:[...new Set(sources)]}:{}) };
         await storage.setItem(PENDING_PREFIX + id, JSON.stringify(pending));
         return pending;
       });

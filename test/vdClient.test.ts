@@ -63,3 +63,22 @@ test('empty prompts cannot send a prefix; tags replace the selected range using 
     text:'before <context>日本語</context> after',selection:{start:29,end:29},
   });
 });
+
+test('immediate sends retain only a process ID returned for the selected session',async()=>{
+  for(const sessionId of [target.id,'unrelated']) {
+    const client=createVdClient(async(_origin,path,spec)=>({success:true,data:spec?.method==='POST'?{id:'execution',session_id:sessionId}:path.endsWith('/queue')?empty:path.includes('conversation-preview')?{session_id:target.id,has_running_turn:false}:{id:target.id,workspace_id:target.workspaceId,executor:target.executor}}),'origin');
+    const result=await client.send(target,'prompt');
+    assert.equal(result.kind,'started');
+    assert.equal('processId' in result?result.processId:undefined,sessionId===target.id?'execution':undefined);
+  }
+});
+
+test('watch preparation records the final appended prompt and queue changes during preparation prevent a write',async()=>{
+  const occupied=fixture({running:true,queues:[queued]});let prepared='';
+  await occupied.client.send(target,'new',{operation:'append',expected:queued},async prompt=>{prepared=prompt;});
+  assert.equal(prepared,'Old prefix\nold prompt\nnew');
+  const changed={...queued,message:{...queued.message,queued_at:'changed during preparation'}};
+  const raced=fixture({running:true,queues:[queued,queued,changed]});
+  await assert.rejects(raced.client.send(target,'new',{operation:'append',expected:queued},async()=>{}),QueueChanged);
+  assert.equal(raced.posts().length,0);
+});

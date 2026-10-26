@@ -6,7 +6,7 @@ export type HandyWidgetProps = {
   enabled: boolean;
   presetName: string;
   openUrl: string;
-  actions: { title: string; url: string; captureTarget?: string; siteGlyph?: string; systemImage?: 'note.text' | 'magnifyingglass' }[];
+  actions: { title: string; url: string; captureTarget?: string; siteGlyph?: string; solidGlyph?: string; systemImage?: 'note.text' | 'magnifyingglass' }[];
 };
 
 const HandyActionsWidget = (props: HandyWidgetProps, environment: WidgetEnvironment) => {
@@ -14,7 +14,9 @@ const HandyActionsWidget = (props: HandyWidgetProps, environment: WidgetEnvironm
   const ready = props.enabled && props.actions?.length > 0;
   const primaryUrl = ready ? props.actions[0].url : props.openUrl;
   const label = ready ? props.actions[0].title : 'Open Handy Actions';
-  const icon = (action: HandyWidgetProps['actions'][number]) => action.siteGlyph
+  const icon = (action: HandyWidgetProps['actions'][number]) => action.solidGlyph
+    ? <Text modifiers={[font({ family: 'FontAwesome6Free-Solid', size: 16 })]}>{action.solidGlyph}</Text>
+    : action.siteGlyph
     ? <Text modifiers={[font({ family: 'FontAwesome6Brands-Regular', size: 16 })]}>{action.siteGlyph}</Text>
     : <Image systemName={action.systemImage ?? (action.captureTarget ? 'square.and.pencil' : 'link')} size={16} />;
   if (environment.widgetFamily === 'accessoryInline') {

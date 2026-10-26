@@ -22,6 +22,49 @@ Use **‹ / ›** to browse recent workspaces in descending update order, three 
 
 Search and workspace selection do not send prompts. Choosing a workspace returns to the previous normal activity view after the message notification is posted. **Back** changes views without cancelling posted drafts. Late query/recent-fetch results update stored data without stealing the selected view. Notifications remain independent of the one-activity policy. At most one active Handy Actions activity is intended per app installation; iOS may dismiss, expire or deny it, so continuous exactly-one visibility is not guaranteed.
 
+### Combined notes and agent replies
+
+In **Notes → Select notes to combine**, select two or more pending notes. Arrange
+them, choose a connection/workspace/session, then review and edit the single
+message before sending. The initial draft joins original text with blank lines.
+The chosen session is fixed while composing. Original notes are retained and
+marked addressed together after verified send or queue acceptance, independently
+of when the agent finishes. Failures/uncertain sends retain the combined draft and
+ordered source links in **Recover unsent notes**. Confirmed acceptance receipts
+reconcile local completion and reply-watch binding without resending the prompt.
+
+On the updated native binary, VD agent actions use a bundled solid **robot** glyph
+on the shared Live Activity and widget. Ordinary notes retain their note glyph;
+workspace search retains its magnifying glass. This needs the signed binary with
+the extension font resource; the About commit identifies JavaScript and does not
+by itself prove which native patch is installed.
+
+**Replies** is a separately paged section of the canonical Live Activity. Incoming
+text updates its unread count without switching away from Actions, Workspaces or
+Search. Opening a reply shows a bounded excerpt and up to three complete HTTP(S)
+links; **Reply** posts session-specific notification input. A completion/failure/
+stopped notification also offers **Reply** when expanded, and its body opens the
+VD workspace in the browser. Replies send exactly the entered text to that same
+session, without the original action prefix.
+
+Host-only protected `HandyAgentReplies-v1` records retain immediate-send process
+IDs and exact destination snapshots. The host reads normalized-log WebSockets for
+assistant text and separately verifies process status; Ready, stream closure and
+an empty queue never establish completion. Queued-message matching requires a
+unique later exact user-message/process match outside the pre-send baseline;
+ambiguous, cancelled/replaced or missing matches remain unverified. Local
+notifications use stable IDs and durable receipts for normal restart/reconnect
+deduplication. Credentials are read from Keychain, redirects/cookies are disabled,
+and header values are redacted before excerpts are bounded.
+
+There is no remote push service or VD backend change. Foreground monitoring
+reconciles outstanding watches, and background monitoring has a finite UIKit
+assertion capped at 25 seconds (or earlier OS expiration); unfinished watches
+resume when runtime returns. Live Activities are bounded, pageable snapshots,
+not scrolling app screens or an indefinite background runtime. A scheduled
+eight-hour job cannot guarantee waking iOS or authorizing activity renewal.
+Native compilation and physical Lock Screen validation remain required.
+
 ### Manual Live Activity renewal
 
 Every lock-screen update upserts one **Refresh Lock Screen** notification, independently of the preset-panel toggle. Press its body (or expanded Refresh action on iOS) to intentionally open the refresh screen, end the shared activity and start one replacement with a fresh lifetime, update widget/panel content, and repost the control. The selected view/search is retained. Ordinary view/theme/content updates do not reset activity lifetime. Disabled surfaces remain disabled, and capture/recovery notifications are not cleared.

@@ -9,6 +9,7 @@ import { RemoteActionEditor } from '@/components/RemoteActionEditor';
 import { makeId, validateHandyState, type AgentActionPayload, type HandyAction } from '@/src/core/handyModel';
 import { saveEditorDraft } from '@/src/core/editorDrafts';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
+import { combineNotes } from '@/src/core/combinedNotes';
 
 export default function NotesScreen() {
   const styles = useNoteStyles();
@@ -25,6 +26,8 @@ export default function NotesScreen() {
   const [custom,setCustom]=useState(false);
   const [payload,setPayload]=useState<AgentActionPayload>({type:'vd-agent',originId:'',prefix:''});
   const [busy,setBusy]=useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [selecting, setSelecting] = useState(false);
   const visible=notes.filter(note=>(note.status??'unaddressed')===view);
   const agentActions=handy.state.presets.flatMap(preset=>preset.actions.filter(action=>action.payload.type==='vd-agent').map(action=>({preset,action})));
 
@@ -74,12 +77,24 @@ export default function NotesScreen() {
     <Stack.Screen options={{ title: 'Notes inbox' }} />
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>Notes inbox</Text>
-      <Text style={styles.copy}>Capture now, refine later. Sending or queueing a note to an agent completes it.</Text>
-      <View style={{flexDirection:'row',gap:12}}>{(['unaddressed','completed'] as const).map(status=><Choice key={status} label={`${status==='unaddressed'?'Unaddressed':'Completed'} (${notes.filter(note=>(note.status??'unaddressed')===status).length})`} selected={view===status} disabled={busy} onPress={()=>{setView(status);setEditing(undefined);setChoosingAgent(false);}} />)}</View>
+      <View style={{flexDirection:'row',gap:12}}>{(['unaddressed','completed'] as const).map(status=><Choice key={status} label={`${status==='unaddressed'?'Unaddressed':'Completed'} (${notes.filter(note=>(note.status??'unaddressed')===status).length})`} selected={view===status} disabled={busy} onPress={()=>{setView(status);setEditing(undefined);setChoosingAgent(false);setSelecting(false);setSelected([]);}} />)}</View>
       <Link style={styles.link} href="/pending-notes">Recover unsent notes</Link>
+      {view === 'unaddressed' ? <>
+        <Choice label={selecting ? 'Cancel selection' : 'Select notes to combine'} disabled={busy} onPress={() => {setSelecting(!selecting);setSelected([]);setEditing(undefined);}} />
+        {selecting ? <Choice label={`Combine ${selected.length} notes →`} disabled={busy || selected.length < 2} onPress={() => {
+          setBusy(true);
+          void (async () => {
+            const fresh = await loadNotes();
+            const draft = await saveEditorDraft({id: makeId('combined'), name: 'Combined notes', payload: {type:'vd-agent',originId:'',prefix:''}}, combineNotes(fresh, selected), undefined, undefined, {sourceNoteIds:selected,combineStep:'order'});
+            router.push({pathname:'/combine-notes',params:{draftId:draft.id}});
+            setSelecting(false);setSelected([]);
+          })().catch(error=>setMessage(error instanceof Error?error.message:'Could not prepare combined draft.')).finally(()=>setBusy(false));
+        }} /> : null}
+      </> : null}
       {message ? <Text style={styles.copy}>{message}</Text> : null}
       {!visible.length ? <Text style={styles.copy}>{view==='completed'?'No completed notes.':'No unaddressed notes. Capture a note with “Use this app” as its destination.'}</Text> : null}
       {visible.map((note) => <View key={note.id} style={styles.card}>
+        {selecting && view === 'unaddressed' ? <Choice label={selected.includes(note.id) ? `Selected ${selected.indexOf(note.id)+1}` : 'Select note'} selected={selected.includes(note.id)} disabled={busy} onPress={()=>setSelected(ids=>ids.includes(note.id)?ids.filter(id=>id!==note.id):[...ids,note.id])} /> : null}
         {editing===note.id?<>
           <Field label="Edit note" multiline value={text} onChangeText={setText} editable={!busy} />
           <Choice label="Save edits" disabled={busy||!text.trim()} onPress={()=>void saveEdit()} />

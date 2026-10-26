@@ -73,7 +73,7 @@ export type NotificationActionRow = {
   payload: HandyActionPayload;
 };
 
-export type LiveActivityActionLink = { title: string; url: string; captureTarget?: string; siteGlyph?: string; systemImage?: 'note.text' | 'magnifyingglass' };
+export type LiveActivityActionLink = { title: string; url: string; captureTarget?: string; siteGlyph?: string; solidGlyph?: string; systemImage?: 'note.text' | 'magnifyingglass' };
 
 export type HandyActionsLiveActivityProps = {
   presetId: string;

@@ -1,4 +1,6 @@
-import { createContext, useContext, type PropsWithChildren } from 'react';
+import { createContext, useContext, useEffect, type PropsWithChildren } from 'react';
+import { AppState } from 'react-native';
+import { resumeAgentReplies } from '@/src/core/agentReplies';
 
 import { useHandyState } from './useHandyState';
 import { useAutomaticLockScreenRefresh } from './useAutomaticLockScreenRefresh';
@@ -9,6 +11,12 @@ const HandyStateContext = createContext<HandyStateContextValue | undefined>(unde
 
 export function HandyStateProvider({ children }: PropsWithChildren) {
   const value = useHandyState();
+  useEffect(()=>{
+    const resume = ()=>{void resumeAgentReplies().catch(()=>{});};
+    resume();
+    const subscription = AppState.addEventListener('change',state=>{if(state==='active')resume();});
+    return ()=>subscription.remove();
+  },[]);
   // A failed storage read must not publish the empty fallback over existing
   // Lock Screen content. Refresh only after a successful read or save.
   useAutomaticLockScreenRefresh(value.state, value.refreshReady, value.setMessage);

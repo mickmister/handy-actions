@@ -13,11 +13,11 @@ module.exports = function withWidgetIconFont(config) {
     if (!target) throw new Error('List withWidgetIconFont before expo-widgets so its Xcode mod runs after target creation');
 
     const directory = path.join(next.modRequest.platformProjectRoot, targetName);
-    const filename = 'FontAwesome6_Brands.ttf';
-    fs.copyFileSync(require.resolve(`@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/${filename}`), path.join(directory, filename));
+    const filenames = ['FontAwesome6_Brands.ttf', 'FontAwesome6_Solid.ttf'];
+    for (const filename of filenames) fs.copyFileSync(require.resolve(`@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/${filename}`), path.join(directory, filename));
     const infoPath = path.join(directory, 'Info.plist');
     const info = plist.parse(fs.readFileSync(infoPath, 'utf8'));
-    info.UIAppFonts = [...new Set([...(info.UIAppFonts ?? []), filename])];
+    info.UIAppFonts = [...new Set([...(info.UIAppFonts ?? []), ...filenames])];
     fs.writeFileSync(infoPath, plist.build(info));
 
     const group = project.findPBXGroupKey({ name: targetName });
@@ -31,12 +31,14 @@ module.exports = function withWidgetIconFont(config) {
     }
     // addResourceFile assumes a host Resources group, which Expo's current
     // template does not create. Attach the file directly to the widget group.
-    const file = project.addFile(filename, group);
-    if (file) {
-      file.uuid = project.generateUuid();
-      file.target = targetUuid;
-      project.addToPbxBuildFileSection(file);
-      project.addToPbxResourcesBuildPhase(file);
+    for (const filename of filenames) {
+      const file = project.addFile(filename, group);
+      if (file) {
+        file.uuid = project.generateUuid();
+        file.target = targetUuid;
+        project.addToPbxBuildFileSection(file);
+        project.addToPbxResourcesBuildPhase(file);
+      }
     }
     return next;
   });
