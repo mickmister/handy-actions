@@ -1,5 +1,8 @@
 import { useCallback, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Switch } from '@/components/FormControls';
+import { useAppTheme, useThemeStyles } from '@/src/hooks/useAppTheme';
+import { appTheme, type ThemeColors } from '@/src/core/appTheme';
 import { Link, useFocusEffect } from 'expo-router';
 
 import { getNotificationStatus, requestNotificationAccess, syncPresetNotifications } from '@/src/core/handyNotifications';
@@ -9,6 +12,8 @@ import { themeOptions } from '@/src/core/handyThemes';
 import { origins } from '@/src/core/origins';
 
 export default function SettingsScreen() {
+  const styles = useThemeStyles(createStyles);
+  const { colors, dark } = useAppTheme();
   const handy = useHandyStateContext();
   const [importText, setImportText] = useState('');
   const [status, setStatus] = useState('Tap Check permission.');
@@ -110,7 +115,7 @@ export default function SettingsScreen() {
               key={preset.id} disabled={syncing || !handy.loaded}
               style={surfaces.widgetPresetId === preset.id || (!surfaces.widgetPresetId && !preset.id) ? styles.primaryButton : styles.secondaryButton}
               onPress={() => void updateSurface({ widgetPresetId: preset.id })}>
-              <Text style={styles.secondaryButtonText}>{preset.name}</Text>
+              <Text style={surfaces.widgetPresetId === preset.id || (!surfaces.widgetPresetId && !preset.id) ? styles.primaryButtonText : styles.secondaryButtonText}>{preset.name}</Text>
             </Pressable>)}
           </View>
           <Text style={styles.copy}>On iOS 17+, circular and rectangular input buttons post native capture notifications; inline widgets and older iOS use app-opening links. Rectangular widgets show two actions; Live Activities arrange all actions in rows of up to two. iOS controls available space, refresh timing and placement.</Text>
@@ -134,12 +139,12 @@ export default function SettingsScreen() {
             disabled={!handy.loaded || syncing || Platform.OS !== 'ios'}
             style={recentWorkspaces.originId === origin.id ? styles.primaryButton : styles.secondaryButton}
             onPress={() => void updateRecentWorkspaces({ originId: origin.id })}>
-            <Text style={styles.secondaryButtonText}>{origin.name}</Text>
+            <Text style={recentWorkspaces.originId === origin.id ? styles.primaryButtonText : styles.secondaryButtonText}>{origin.name}</Text>
           </Pressable>)}
         </View>
         {originMessage ? <Text style={styles.copy}>{originMessage}</Text> : null}
         {!originChoices.some(origin => origin.id === recentWorkspaces.originId) ? <Text style={styles.copy}>Choose a saved VD origin to enable the list.</Text> : null}
-        <Link href="/origins">Manage origins / test VD connection</Link>
+        <Link style={styles.link} href="/origins">Manage origins / test VD connection</Link>
         <Text style={styles.copy}>Tap a workspace name to open its origin’s /workspaces/:workspaceId page in your browser. Browser authentication is separate from the app’s saved API headers.</Text>
         <Text style={styles.copy}>Refreshes when the app opens or returns to the foreground, and when you refresh Lock Screen surfaces. Live Activities must also be enabled above.</Text>
         <Pressable style={styles.darkButton} disabled={!handy.loaded || syncing || Platform.OS !== 'ios'} onPress={() => void refreshNotifications()}>
@@ -149,27 +154,27 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Live Activity theme</Text>
-        {themeOptions.map(theme=><Pressable key={theme.id} disabled={!handy.loaded||syncing} style={[styles.card,{backgroundColor:theme.colors[0],borderColor:(handy.state.theme??'psychedelic')===theme.id?'#38BDF8':'transparent',borderWidth:3}]} onPress={()=>{
+        <Text style={styles.cardTitle}>App & Live Activity theme</Text>
+        {themeOptions.map(theme=><Pressable key={theme.id} accessibilityRole="button" accessibilityState={{ selected: (handy.state.theme??'psychedelic')===theme.id, disabled: !handy.loaded||syncing }} disabled={!handy.loaded||syncing} style={[styles.card,{backgroundColor:theme.colors[0],borderColor:(handy.state.theme??'psychedelic')===theme.id?colors.primary:'transparent',borderWidth:3}]} onPress={()=>{
           setSyncing(true);
           void handy.updateTheme(theme.id).then(result=>{if(!result.ok)throw new Error(result.message);}).catch(()=>Alert.alert('Theme','Could not apply the theme.')).finally(()=>setSyncing(false));
-        }}><Text style={{color:theme.id==='paper'?'#172D36':'#F8FAFC',fontWeight:'800'}}>{theme.name}{(handy.state.theme??'psychedelic')===theme.id?' ✓':''}</Text>
-          <View style={styles.buttonRow}>{theme.colors.map(color=><View key={color} style={{backgroundColor:color,width:36,height:20,borderRadius:6,borderWidth:1,borderColor:'#94A3B8'}} />)}</View>
-          <Text style={{color:theme.id==='paper'?'#475569':'#D3DFEB'}}>{theme.description}</Text>
+        }}><Text style={{color:appTheme(theme.id).colors.text,fontWeight:'800'}}>{theme.name}{(handy.state.theme??'psychedelic')===theme.id?' ✓':''}</Text>
+          <View style={styles.buttonRow}>{theme.colors.map(color=><View key={color} style={{backgroundColor:color,width:36,height:20,borderRadius:6,borderWidth:1,borderColor:appTheme(theme.id).colors.border}} />)}</View>
+          <Text style={{color:appTheme(theme.id).colors.muted}}>{theme.description}</Text>
         </Pressable>)}
-        <Text style={styles.copy}>Global theme for Live Activities. Color changes happen on app-requested updates; continuous background animation is not available here. Always-On uses a subdued palette. No repeating animation is used.</Text>
+        <Text style={styles.copy}>Applies throughout the app and to Live Activities, and is saved on this device. Live Activity colors change on app-requested updates; Always-On uses a subdued palette.</Text>
       </View>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Connections</Text>
-        <Link href="/origins">Manage secure origins and HTTP headers</Link>
+        <Link style={styles.link} href="/origins">Manage secure origins and HTTP headers</Link>
         <Text style={styles.copy}>Connections stay in secure storage and are excluded from preset exports. Imported remote actions must be reconnected locally.</Text>
       </View>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Notes</Text>
-        <Link href="/notes">View notes saved in this app</Link>
-        <Link href="/pending-notes">Recover unsent notes</Link>
+        <Link style={styles.link} href="/notes">View notes saved in this app</Link>
+        <Link style={styles.link} href="/pending-notes">Recover unsent notes</Link>
       </View>
 
       <View style={styles.card}>
@@ -205,7 +210,9 @@ export default function SettingsScreen() {
           autoCapitalize="none"
           autoCorrect={false}
           placeholder="Paste Handy Actions JSON"
-          placeholderTextColor="#8792a2"
+          placeholderTextColor={colors.placeholder}
+          selectionColor={colors.primary}
+          keyboardAppearance={dark ? 'dark' : 'light'}
           style={styles.textArea}
         />
         <Pressable style={styles.darkButton} onPress={importPresets}>
@@ -216,23 +223,24 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#f5f7fb' },
+const createStyles = (c: ThemeColors) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.background },
   content: { gap: 14, padding: 18, paddingBottom: 40 },
   header: { gap: 8, paddingTop: 10 },
-  eyebrow: { color: '#53657d', fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
-  title: { color: '#0f172a', fontSize: 30, fontWeight: '800', letterSpacing: -0.6 },
-  copy: { color: '#516070', fontSize: 16, lineHeight: 23 },
-  card: { backgroundColor: '#fff', borderColor: '#e5e9f0', borderRadius: 22, borderWidth: 1, gap: 12, padding: 16 },
-  cardTitle: { color: '#111827', fontSize: 18, fontWeight: '800' },
+  eyebrow: { color: c.muted, fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  title: { color: c.text, fontSize: 30, fontWeight: '800', letterSpacing: -0.6 },
+  copy: { color: c.muted, fontSize: 16, lineHeight: 23 },
+  link: { color: c.primary, fontSize: 16, lineHeight: 23 },
+  card: { backgroundColor: c.surface, borderColor: c.border, borderRadius: 22, borderWidth: 1, gap: 12, padding: 16 },
+  cardTitle: { color: c.text, fontSize: 18, fontWeight: '800' },
   buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  primaryButton: { alignItems: 'center', backgroundColor: '#38bdf8', borderRadius: 16, minHeight: 48, justifyContent: 'center', paddingHorizontal: 16 },
-  primaryButtonText: { color: '#082f49', fontSize: 15, fontWeight: '800' },
-  secondaryButton: { alignItems: 'center', backgroundColor: '#e0f2fe', borderRadius: 16, minHeight: 48, justifyContent: 'center', paddingHorizontal: 16 },
-  secondaryButtonText: { color: '#075985', fontSize: 15, fontWeight: '800' },
-  darkButton: { alignItems: 'center', backgroundColor: '#0f172a', borderRadius: 16, minHeight: 48, justifyContent: 'center' },
-  darkButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  codeBlock: { backgroundColor: '#0f172a', borderRadius: 16, color: '#dbeafe', fontFamily: 'SpaceMono', fontSize: 12, lineHeight: 18, padding: 14 },
-  textArea: { backgroundColor: '#f8fafc', borderColor: '#d7dde7', borderRadius: 14, borderWidth: 1, color: '#0f172a', fontFamily: 'SpaceMono', fontSize: 13, minHeight: 160, padding: 14, textAlignVertical: 'top' },
+  primaryButton: { alignItems: 'center', backgroundColor: c.primary, borderRadius: 16, minHeight: 48, justifyContent: 'center', paddingHorizontal: 16 },
+  primaryButtonText: { color: c.onPrimary, fontSize: 15, fontWeight: '800' },
+  secondaryButton: { alignItems: 'center', backgroundColor: c.secondary, borderRadius: 16, minHeight: 48, justifyContent: 'center', paddingHorizontal: 16 },
+  secondaryButtonText: { color: c.onSecondary, fontSize: 15, fontWeight: '800' },
+  darkButton: { alignItems: 'center', backgroundColor: c.primary, borderRadius: 16, minHeight: 48, justifyContent: 'center' },
+  darkButtonText: { color: c.onPrimary, fontSize: 16, fontWeight: '800' },
+  codeBlock: { backgroundColor: c.code, borderRadius: 16, color: c.codeText, fontFamily: 'SpaceMono', fontSize: 12, lineHeight: 18, padding: 14 },
+  textArea: { backgroundColor: c.input, borderColor: c.border, borderRadius: 14, borderWidth: 1, color: c.text, fontFamily: 'SpaceMono', fontSize: 13, minHeight: 160, padding: 14, textAlignVertical: 'top' },
 });

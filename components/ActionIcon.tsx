@@ -2,12 +2,15 @@ import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
 
 import type { HandyActionPayload } from '@/src/core/handyModel';
 import { siteIconForPayload } from '@/src/core/siteIcons';
+import { useAppTheme } from '@/src/hooks/useAppTheme';
 
-export function ActionIcon({ payload, size = 22, color = '#334155' }: {
+export function ActionIcon({ payload, size = 22, color: customColor }: {
   payload: HandyActionPayload;
   size?: number;
   color?: string;
 }) {
+  const { colors } = useAppTheme();
+  const color = customColor ?? colors.muted;
   const site = siteIconForPayload(payload);
   // Labels remain visible; the icon is decorative and should not be read twice.
   if (site) return <FontAwesome6 name={site} brand size={size} color={color} accessible={false} />;

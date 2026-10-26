@@ -2,7 +2,7 @@ import { Link, Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'ex
 import { useCallback, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
-import { noteStyles as styles } from '@/components/NoteComposer';
+import { useNoteStyles } from '@/components/NoteComposer';
 import { completeNote, editNote, loadNotes, saveNote, setNoteStatus, type HandyNote } from '@/src/core/handyNotes';
 import { Choice, Field } from '@/components/FormControls';
 import { RemoteActionEditor } from '@/components/RemoteActionEditor';
@@ -11,6 +11,7 @@ import { saveEditorDraft } from '@/src/core/editorDrafts';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 
 export default function NotesScreen() {
+  const styles = useNoteStyles();
   const router=useRouter();
   const handy=useHandyStateContext();
   const params = useLocalSearchParams<{ text?: string; submissionId?: string }>();
@@ -75,7 +76,7 @@ export default function NotesScreen() {
       <Text style={styles.title}>Notes inbox</Text>
       <Text style={styles.copy}>Capture now, refine later. Sending or queueing a note to an agent completes it.</Text>
       <View style={{flexDirection:'row',gap:12}}>{(['unaddressed','completed'] as const).map(status=><Choice key={status} label={`${status==='unaddressed'?'Unaddressed':'Completed'} (${notes.filter(note=>(note.status??'unaddressed')===status).length})`} selected={view===status} disabled={busy} onPress={()=>{setView(status);setEditing(undefined);setChoosingAgent(false);}} />)}</View>
-      <Link href="/pending-notes">Recover unsent notes</Link>
+      <Link style={styles.link} href="/pending-notes">Recover unsent notes</Link>
       {message ? <Text style={styles.copy}>{message}</Text> : null}
       {!visible.length ? <Text style={styles.copy}>{view==='completed'?'No completed notes.':'No unaddressed notes. Capture a note with “Use this app” as its destination.'}</Text> : null}
       {visible.map((note) => <View key={note.id} style={styles.card}>
@@ -92,7 +93,7 @@ export default function NotesScreen() {
               <Choice label="Review agent prompt" disabled={busy||!payload.originId} onPress={()=>void sendToAgent({id:makeId('note-agent'),name:'Send note to agent',payload})} /></>:null}
           </View>:null}
         </>:<>
-          <Text selectable style={{ fontSize: 17, color: '#0f172a' }}>{note.text}</Text>
+          <Text selectable style={styles.body}>{note.text}</Text>
           <Choice label="Edit / send to agent" disabled={busy} onPress={()=>{setEditing(note.id);setText(note.text);setChoosingAgent(false);setCustom(false);}} />
           <Choice label={note.status==='completed'?'Reopen note':'Mark completed'} disabled={busy} onPress={()=>void changeStatus(note)} />
         </>}

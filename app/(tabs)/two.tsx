@@ -9,10 +9,14 @@ import * as ExpoLinking from 'expo-linking';
 import { RemoteActionEditor } from '@/components/RemoteActionEditor';
 import { isInputPayload } from '@/src/core/handyModel';
 import { ActionIcon } from '@/components/ActionIcon';
+import { useAppTheme, useThemeStyles } from '@/src/hooks/useAppTheme';
+import type { ThemeColors } from '@/src/core/appTheme';
 
 type PayloadType = HandyActionPayload['type'];
 
 export default function ActionsScreen() {
+  const styles = useThemeStyles(createStyles);
+  const { colors, dark } = useAppTheme();
   const handy = useHandyStateContext();
   const [selectedPresetId, setSelectedPresetId] = useState<string | undefined>(handy.state.presets[0]?.id);
   const selectedPreset = useMemo(
@@ -89,7 +93,7 @@ export default function ActionsScreen() {
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{editingId ? 'Edit action' : 'Add action'}</Text>
-            <TextInput value={name} onChangeText={setName} placeholder="My LinkedIn" placeholderTextColor="#8792a2" style={styles.input} />
+            <TextInput value={name} onChangeText={setName} placeholder="My LinkedIn" placeholderTextColor={colors.placeholder} selectionColor={colors.primary} keyboardAppearance={dark ? 'dark' : 'light'} style={styles.input} />
             <View style={styles.chips}>
               {(['notes', 'qr', 'web', 'deeplink', 'text-input','http','vd-agent','vd-workspace-search'] as const).map((payloadType) => (
                 <Pressable
@@ -117,7 +121,9 @@ export default function ActionsScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               placeholder={type === 'qr' ? 'QR value or URL' : type === 'text-input' ? 'app://add-note?text={text}' : 'https://example.test or app://target'}
-              placeholderTextColor="#8792a2"
+              placeholderTextColor={colors.placeholder}
+              selectionColor={colors.primary}
+              keyboardAppearance={dark ? 'dark' : 'light'}
               style={styles.input}
             />:null}
             {type === 'text-input' ? <>
@@ -208,31 +214,31 @@ function makePayload(type: PayloadType, value: string): HandyActionPayload {
   return { type: 'qr', value: value.trim() };
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#f5f7fb' },
+const createStyles = (c: ThemeColors) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.background },
   content: { gap: 14, padding: 18, paddingBottom: 40 },
   header: { gap: 8, paddingTop: 10 },
-  eyebrow: { color: '#53657d', fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
-  title: { color: '#0f172a', fontSize: 30, fontWeight: '800', letterSpacing: -0.6 },
-  copy: { color: '#516070', fontSize: 16, lineHeight: 23 },
-  card: { backgroundColor: '#fff', borderColor: '#e5e9f0', borderRadius: 22, borderWidth: 1, gap: 12, padding: 16 },
-  emptyCard: { backgroundColor: '#eef6ff', borderColor: '#cfe7ff', borderRadius: 22, borderWidth: 1, gap: 8, padding: 16 },
-  cardTitle: { color: '#111827', fontSize: 18, fontWeight: '800' },
-  meta: { color: '#6b7280', fontFamily: 'SpaceMono', fontSize: 12, lineHeight: 18, marginTop: 6 },
+  eyebrow: { color: c.muted, fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  title: { color: c.text, fontSize: 30, fontWeight: '800', letterSpacing: -0.6 },
+  copy: { color: c.muted, fontSize: 16, lineHeight: 23 },
+  card: { backgroundColor: c.surface, borderColor: c.border, borderRadius: 22, borderWidth: 1, gap: 12, padding: 16 },
+  emptyCard: { backgroundColor: c.surfaceRaised, borderColor: c.border, borderRadius: 22, borderWidth: 1, gap: 8, padding: 16 },
+  cardTitle: { color: c.text, fontSize: 18, fontWeight: '800' },
+  meta: { color: c.muted, fontFamily: 'SpaceMono', fontSize: 12, lineHeight: 18, marginTop: 6 },
   row: { alignItems: 'center', flexDirection: 'row', gap: 12, justifyContent: 'space-between' },
   orderRow: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  orderButton: { backgroundColor: '#f1f5f9', borderRadius: 12, minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
+  orderButton: { backgroundColor: c.secondary, borderRadius: 12, minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
   disabledButton: { opacity: 0.4 },
   flex: { flex: 1 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { backgroundColor: '#f1f5f9', borderRadius: 999, minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
-  selectedChip: { backgroundColor: '#0f172a', borderRadius: 999, minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
-  chipText: { color: '#475569', fontSize: 15, fontWeight: '800' },
-  selectedChipText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-  input: { backgroundColor: '#f8fafc', borderColor: '#d7dde7', borderRadius: 14, borderWidth: 1, color: '#0f172a', fontSize: 16, minHeight: 48, paddingHorizontal: 14 },
-  primaryButton: { alignItems: 'center', backgroundColor: '#0f172a', borderRadius: 16, minHeight: 48, justifyContent: 'center' },
-  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  secondaryButton: { alignItems: 'center', backgroundColor: '#e0f2fe', borderRadius: 16, minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },
-  secondaryButtonText: { color: '#075985', fontSize: 15, fontWeight: '800' },
-  deleteText: { color: '#dc2626', fontSize: 15, fontWeight: '800', minHeight: 44, paddingTop: 12 },
+  chip: { backgroundColor: c.secondary, borderRadius: 999, minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
+  selectedChip: { backgroundColor: c.primary, borderRadius: 999, minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
+  chipText: { color: c.onSecondary, fontSize: 15, fontWeight: '800' },
+  selectedChipText: { color: c.onPrimary, fontSize: 15, fontWeight: '800' },
+  input: { backgroundColor: c.input, borderColor: c.border, borderRadius: 14, borderWidth: 1, color: c.text, fontSize: 16, minHeight: 48, paddingHorizontal: 14 },
+  primaryButton: { alignItems: 'center', backgroundColor: c.primary, borderRadius: 16, minHeight: 48, justifyContent: 'center' },
+  primaryButtonText: { color: c.onPrimary, fontSize: 16, fontWeight: '800' },
+  secondaryButton: { alignItems: 'center', backgroundColor: c.secondary, borderRadius: 16, minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },
+  secondaryButtonText: { color: c.onSecondary, fontSize: 15, fontWeight: '800' },
+  deleteText: { color: c.danger, fontSize: 15, fontWeight: '800', minHeight: 44, paddingTop: 12 },
 });

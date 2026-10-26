@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
-import { Choice, Field, formStyles as styles } from './FormControls';
+import { Choice, Field, useFormStyles } from './FormControls';
+import { useAppTheme } from '@/src/hooks/useAppTheme';
 import { createVdClient, displayName, sessionLabel, sessionRef, type Session, type Workspace } from '@/src/core/vdClient';
 import { request } from '@/src/core/requests';
 import { loadFavorites, updateFavorite, type Favorite } from '@/src/core/agentFavorites';
@@ -8,6 +9,8 @@ import type { AgentSession } from '@/src/core/handyModel';
 import { workspacePage } from '@/src/core/workspacePagination';
 
 export function SessionPicker({ originId, value, onSelect, disabled = false }: { originId: string; value?: AgentSession; onSelect(value: AgentSession): void; disabled?: boolean }) {
+  const styles = useFormStyles();
+  const { colors } = useAppTheme();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
@@ -46,7 +49,7 @@ export function SessionPicker({ originId, value, onSelect, disabled = false }: {
       <Choice label="Next workspaces" disabled={disabled || visible.page === visible.pageCount - 1} onPress={() => setPage(visible.page + 1)} />
     </View> : null}
     </View>}
-    {workspace ? <View style={{ gap: 12, borderTopWidth: 1, borderTopColor: '#cad5dc', paddingTop: 16 }}>
+    {workspace ? <View style={{ gap: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 16 }}>
       <Text accessibilityRole="header" style={styles.label}>Sessions</Text>
       <Text style={styles.copy}>Choose a session from the selected workspace.</Text>
       {sessionMessage ? <Text accessibilityLiveRegion="polite" style={styles.copy}>{sessionMessage}</Text> : null}

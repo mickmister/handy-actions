@@ -97,9 +97,15 @@ After installing the new binary, grant notifications, create or use an enabled p
 
 Also check local preset-panel replies, multiple presets, blank/cancel, repeated capture taps, refresh while capture is pending, denied notification permission and the explicit composer alternative. Test circular/rectangular native widget capture and inline app-opening fallback separately. Verify manual renewal after actual ActivityKit expiry and that the refresh control survives/reposts without erasing capture notifications. Native storage-failure/retry needs an injected failure or a controlled device test; JS import-failure tests alone do not establish native recovery. Record unlock prompts and OS restrictions separately. Until native build and device checks pass, this is not a proven whole-flow Lock Screen implementation.
 
-## Live Activity styling
+## App and Live Activity styling
 
-**Settings → Live Activity theme** previews and persists a global **Psychedelic** (default), **Midnight**, or **Paper** palette. Shared definitions live in `src/core/handyThemes.ts`. The banner uses a native linear gradient; expanded Island content and compact accents use the selected palette with contrasting action tiles. Always-On uses a subdued solid appearance. Themes update existing tracked activities without end/restart churn or altering action destinations.
+**Settings → App & Live Activity theme** previews and persists a global **Psychedelic** (default), **Midnight**, or **Paper** palette. The saved choice controls every app screen, navigation headers/tabs, status bar, forms, switches, note/session editors, recovery views, and glass panels. Psychedelic and Midnight use dark native chrome; Paper uses light chrome, independently of the device appearance. QR codes keep a white scan area and dark ink in every theme.
+
+App semantic color tokens live in `src/core/appTheme.ts`; use `useAppTheme()` for inline colors and `useThemeStyles()` for memoized style factories. Shared form/note styles expose `useFormStyles()` and `useNoteStyles()`. New UI should use these tokens rather than fixed colors. Contrast tests cover text, placeholders, selected controls, status labels, code blocks, QR codes, and theme previews across all three palettes.
+
+Live Activity gradient definitions live in `src/core/handyThemes.ts`. The banner uses a native linear gradient; expanded Island content and compact accents use the selected palette with contrasting action tiles. Always-On uses a subdued solid appearance. Themes update existing tracked activities without end/restart churn or altering action destinations.
+
+For visual verification, select each theme and visit all three tabs, preset actions, QR display, connections, capture/session selection, notes, and recovery. Check selected/unselected controls and input focus, then relaunch to confirm the choice persists. App theming is a source-only change using existing dependencies and can ship through EAS Update to a compatible installed runtime.
 
 Psychedelic color ordering changes on app-requested content refreshes. The installed runtime supports gradients, but this implementation does not use continuous animation, JS timers, or unattended background color cycling. There is no repeating motion to suppress for Reduce Motion. Actual color transitions, Always-On readability, and Reduce Motion appearance still require an iPhone proof; continuous animated Lock Screen support is **not** established.
 

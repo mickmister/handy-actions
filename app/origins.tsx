@@ -1,7 +1,7 @@
 import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert, ScrollView, Text, View } from 'react-native';
-import { Choice, Field, formStyles as styles } from '@/components/FormControls';
+import { Choice, Field, useFormStyles } from '@/components/FormControls';
 import { origins } from '@/src/core/origins';
 import { makeId } from '@/src/core/handyModel';
 import type { OriginDraft, OriginSummary } from '@/src/core/originRepository';
@@ -10,6 +10,7 @@ import type { Transport } from '@/src/core/requestClient';
 import { testVdConnection, type VdConnectionTestResult } from '@/src/core/vdConnectionTest';
 
 export default function OriginsScreen() {
+  const styles = useFormStyles();
   const [list, setList] = useState<OriginSummary[]>([]);
   const [draft, setDraftValue] = useState<OriginDraft>();
   const [message, setMessage] = useState('');

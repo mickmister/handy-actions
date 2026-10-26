@@ -1,6 +1,7 @@
 import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import { type PropsWithChildren } from 'react';
 import { Platform, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useAppTheme } from '@/src/hooks/useAppTheme';
 
 type GlassPanelProps = PropsWithChildren<{
   style?: StyleProp<ViewStyle>;
@@ -8,12 +9,13 @@ type GlassPanelProps = PropsWithChildren<{
 }>;
 
 export function GlassPanel({ children, style, fallbackStyle }: GlassPanelProps) {
+  const { dark, colors } = useAppTheme();
   if (Platform.OS === 'ios' && isGlassEffectAPIAvailable()) {
     return (
       <GlassView
         glassEffectStyle="regular"
-        tintColor="#0f172a"
-        colorScheme="dark"
+        tintColor={colors.surfaceRaised}
+        colorScheme={dark ? 'dark' : 'light'}
         isInteractive
         style={[styles.panel, style]}>
         {children}
@@ -21,7 +23,7 @@ export function GlassPanel({ children, style, fallbackStyle }: GlassPanelProps) 
     );
   }
 
-  return <View style={[styles.panel, fallbackStyle, style]}>{children}</View>;
+  return <View style={[styles.panel, { backgroundColor: colors.surfaceRaised }, fallbackStyle, style]}>{children}</View>;
 }
 
 const styles = StyleSheet.create({

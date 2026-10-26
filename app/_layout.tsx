@@ -3,10 +3,11 @@ import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useRef } from 'react';
-import { AppState } from 'react-native';
+import { Appearance, AppState } from 'react-native';
 import 'react-native-reanimated';
 
-import { useColorScheme } from '@/components/useColorScheme';
+import { useAppTheme } from '@/src/hooks/useAppTheme';
+import { StatusBar } from 'expo-status-bar';
 import {
   configureNotificationSurface,
   consumeInitialNotification,
@@ -51,13 +52,20 @@ export default function RootLayout() {
     return null;
   }
 
-  return <RootLayoutNav />;
+  return <HandyStateProvider><RootLayoutNav /></HandyStateProvider>;
 }
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
+  const { dark, colors } = useAppTheme();
+  const baseTheme = dark ? DarkTheme : DefaultTheme;
   const router = useRouter();
   const routedSubmissions = useRef(new Set<string>());
+
+  // Native alerts, menus, and keyboard chrome follow the saved app appearance.
+  useEffect(() => {
+    Appearance.setColorScheme(dark ? 'dark' : 'light');
+    return () => Appearance.setColorScheme('unspecified');
+  }, [dark]);
 
   useEffect(() => {
     setNotificationPressHandler((target) => {
@@ -105,14 +113,13 @@ function RootLayoutNav() {
   }, [router]);
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <HandyStateProvider>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="qr" options={{ presentation: 'modal', title: 'QR Code' }} />
-          <Stack.Screen name="preset-actions" options={{ presentation: 'modal', title: 'Preset Actions' }} />
-        </Stack>
-      </HandyStateProvider>
+    <ThemeProvider value={{ ...baseTheme, colors: { ...baseTheme.colors, primary: colors.primary, background: colors.background, card: colors.surface, text: colors.text, border: colors.border, notification: colors.danger } }}>
+      <StatusBar style={dark ? 'light' : 'dark'} />
+      <Stack screenOptions={{ headerStyle: { backgroundColor: colors.surface }, headerTintColor: colors.text, contentStyle: { backgroundColor: colors.background } }}>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="qr" options={{ presentation: 'modal', title: 'QR Code' }} />
+        <Stack.Screen name="preset-actions" options={{ presentation: 'modal', title: 'Preset Actions' }} />
+      </Stack>
     </ThemeProvider>
   );
 }

@@ -4,8 +4,12 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { GlassPanel } from '@/components/GlassPanel';
 import { syncPresetNotifications } from '@/src/core/handyNotifications';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
+import { useAppTheme, useThemeStyles } from '@/src/hooks/useAppTheme';
+import type { ThemeColors } from '@/src/core/appTheme';
 
 export default function PresetsScreen() {
+  const styles = useThemeStyles(createStyles);
+  const { colors, dark } = useAppTheme();
   const handy = useHandyStateContext();
   const [newPresetName, setNewPresetName] = useState('');
   const enabledCount = handy.state.presets.filter((preset) => preset.enabled).length;
@@ -45,7 +49,9 @@ export default function PresetsScreen() {
           value={newPresetName}
           onChangeText={setNewPresetName}
           placeholder="Social / Conference"
-          placeholderTextColor="#8792a2"
+          placeholderTextColor={colors.placeholder}
+          selectionColor={colors.primary}
+          keyboardAppearance={dark ? 'dark' : 'light'}
           style={styles.input}
         />
         <Pressable style={styles.secondaryButton} onPress={addPreset}>
@@ -99,42 +105,42 @@ export default function PresetsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#f5f7fb' },
+const createStyles = (c: ThemeColors) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.background },
   content: { gap: 14, padding: 18, paddingBottom: 40 },
   header: { gap: 8, paddingTop: 10 },
-  eyebrow: { color: '#53657d', fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
-  title: { color: '#0f172a', fontSize: 30, fontWeight: '800', letterSpacing: -0.6 },
-  copy: { color: '#516070', fontSize: 16, lineHeight: 23 },
+  eyebrow: { color: c.muted, fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  title: { color: c.text, fontSize: 30, fontWeight: '800', letterSpacing: -0.6 },
+  copy: { color: c.muted, fontSize: 16, lineHeight: 23 },
   statusCard: { borderRadius: 24, gap: 12, padding: 18 },
-  statusCardFallback: { backgroundColor: '#111827' },
-  statusTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
-  statusCopy: { color: '#cbd5e1', fontSize: 15, lineHeight: 21 },
-  card: { backgroundColor: '#fff', borderColor: '#e5e9f0', borderRadius: 22, borderWidth: 1, gap: 12, padding: 16 },
-  emptyCard: { backgroundColor: '#eef6ff', borderColor: '#cfe7ff', borderRadius: 22, borderWidth: 1, gap: 8, padding: 16 },
-  cardTitle: { color: '#111827', fontSize: 18, fontWeight: '800' },
-  meta: { color: '#6b7280', fontSize: 14, marginTop: 4 },
+  statusCardFallback: { backgroundColor: c.surfaceRaised },
+  statusTitle: { color: c.text, fontSize: 22, fontWeight: '800' },
+  statusCopy: { color: c.muted, fontSize: 15, lineHeight: 21 },
+  card: { backgroundColor: c.surface, borderColor: c.border, borderRadius: 22, borderWidth: 1, gap: 12, padding: 16 },
+  emptyCard: { backgroundColor: c.surfaceRaised, borderColor: c.border, borderRadius: 22, borderWidth: 1, gap: 8, padding: 16 },
+  cardTitle: { color: c.text, fontSize: 18, fontWeight: '800' },
+  meta: { color: c.muted, fontSize: 14, marginTop: 4 },
   row: { alignItems: 'center', flexDirection: 'row', gap: 12, justifyContent: 'space-between' },
   flex: { flex: 1 },
   input: {
-    backgroundColor: '#f8fafc',
-    borderColor: '#d7dde7',
+    backgroundColor: c.input,
+    borderColor: c.border,
     borderRadius: 14,
     borderWidth: 1,
-    color: '#0f172a',
+    color: c.text,
     fontSize: 16,
     minHeight: 48,
     paddingHorizontal: 14,
   },
-  primaryButton: { alignItems: 'center', backgroundColor: '#38bdf8', borderRadius: 16, minHeight: 48, justifyContent: 'center' },
-  primaryButtonText: { color: '#082f49', fontSize: 16, fontWeight: '800' },
-  secondaryButton: { alignItems: 'center', backgroundColor: '#0f172a', borderRadius: 16, minHeight: 48, justifyContent: 'center' },
-  secondaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  enableButton: { alignItems: 'center', backgroundColor: '#dcfce7', borderRadius: 14, minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
-  enableButtonText: { color: '#166534', fontSize: 15, fontWeight: '800' },
-  disableButton: { alignItems: 'center', backgroundColor: '#fee2e2', borderRadius: 14, minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
-  disableButtonText: { color: '#991b1b', fontSize: 15, fontWeight: '800' },
-  enabledPill: { backgroundColor: '#dcfce7', borderRadius: 999, color: '#166534', fontSize: 13, fontWeight: '800', paddingHorizontal: 10, paddingVertical: 6 },
-  disabledPill: { backgroundColor: '#f1f5f9', borderRadius: 999, color: '#64748b', fontSize: 13, fontWeight: '800', paddingHorizontal: 10, paddingVertical: 6 },
-  deleteText: { color: '#dc2626', fontSize: 15, fontWeight: '800', minHeight: 44, paddingTop: 12 },
+  primaryButton: { alignItems: 'center', backgroundColor: c.primary, borderRadius: 16, minHeight: 48, justifyContent: 'center' },
+  primaryButtonText: { color: c.onPrimary, fontSize: 16, fontWeight: '800' },
+  secondaryButton: { alignItems: 'center', backgroundColor: c.secondary, borderRadius: 16, minHeight: 48, justifyContent: 'center' },
+  secondaryButtonText: { color: c.onSecondary, fontSize: 16, fontWeight: '800' },
+  enableButton: { alignItems: 'center', backgroundColor: c.successSurface, borderRadius: 14, minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
+  enableButtonText: { color: c.success, fontSize: 15, fontWeight: '800' },
+  disableButton: { alignItems: 'center', backgroundColor: c.dangerSurface, borderRadius: 14, minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
+  disableButtonText: { color: c.danger, fontSize: 15, fontWeight: '800' },
+  enabledPill: { backgroundColor: c.successSurface, borderRadius: 999, color: c.success, fontSize: 13, fontWeight: '800', paddingHorizontal: 10, paddingVertical: 6 },
+  disabledPill: { backgroundColor: c.secondary, borderRadius: 999, color: c.muted, fontSize: 13, fontWeight: '800', paddingHorizontal: 10, paddingVertical: 6 },
+  deleteText: { color: c.danger, fontSize: 15, fontWeight: '800', minHeight: 44, paddingTop: 12 },
 });

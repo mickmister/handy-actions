@@ -2,11 +2,12 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, Text } from 'react-native';
 import { Choice } from '@/components/FormControls';
-import { noteStyles as styles } from '@/components/NoteComposer';
+import { useNoteStyles } from '@/components/NoteComposer';
 import { syncPresetNotifications } from '@/src/core/handyNotifications';
 import { loadHandyState } from '@/src/core/handyStore';
 
 export default function RefreshLockScreenScreen() {
+  const styles = useNoteStyles();
   const {token}=useLocalSearchParams<{token?:string}>();
   const started=useRef('');
   const [busy,setBusy]=useState(false);

@@ -3,7 +3,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
-import { NoteComposer, noteStyles as styles } from '@/components/NoteComposer';
+import { NoteComposer, useNoteStyles } from '@/components/NoteComposer';
 import { findAction, isInputPayload, makeId, textInputUrl, type AgentSession, type HandyAction } from '@/src/core/handyModel';
 import { completeNote, confirmAgentHandoff, editNote, markNoteAttempt, pendingNotes, queueNote, saveNote } from '@/src/core/handyNotes';
 import { readEditorDraft, removeEditorDraft, saveEditorDraft } from '@/src/core/editorDrafts';
@@ -20,6 +20,7 @@ import { beginWorkspaceSearch } from '@/src/core/workspaceSearch';
 const deliveriesInFlight = new Set<string>();
 
 export default function CaptureScreen() {
+  const styles = useNoteStyles();
   const params = useLocalSearchParams<{ presetId?: string; actionId?: string; submissionId?: string; notification?: string; draftId?: string; submit?: string }>();
   const handy = useHandyStateContext();
   const router = useRouter();

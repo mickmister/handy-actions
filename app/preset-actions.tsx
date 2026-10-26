@@ -5,8 +5,11 @@ import { runActionPayload } from '@/src/core/handyNotifications';
 import { isInputPayload, type HandyAction } from '@/src/core/handyModel';
 import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 import { ActionIcon } from '@/components/ActionIcon';
+import { useThemeStyles } from '@/src/hooks/useAppTheme';
+import type { ThemeColors } from '@/src/core/appTheme';
 
 export default function PresetActionsScreen() {
+  const styles = useThemeStyles(createStyles);
   const router = useRouter();
   const handy = useHandyStateContext();
   const params = useLocalSearchParams<{ presetId?: string }>();
@@ -84,23 +87,23 @@ function actionSummary(action: HandyAction): string {
   return action.payload.url;
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#f5f7fb' },
+const createStyles = (c: ThemeColors) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: c.background },
   content: { gap: 14, padding: 18, paddingBottom: 40 },
   header: { gap: 8, paddingTop: 10 },
-  eyebrow: { color: '#53657d', fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
-  title: { color: '#0f172a', fontSize: 30, fontWeight: '800', letterSpacing: -0.6 },
-  copy: { color: '#516070', fontSize: 16, lineHeight: 23 },
-  card: { backgroundColor: '#fff', borderColor: '#e5e9f0', borderRadius: 22, borderWidth: 1, gap: 14, padding: 16 },
-  emptyCard: { backgroundColor: '#eef6ff', borderColor: '#cfe7ff', borderRadius: 22, borderWidth: 1, gap: 8, padding: 16 },
-  cardTitle: { color: '#111827', fontSize: 18, fontWeight: '800' },
-  meta: { color: '#6b7280', fontSize: 14, lineHeight: 20, marginTop: 6 },
+  eyebrow: { color: c.muted, fontSize: 13, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  title: { color: c.text, fontSize: 30, fontWeight: '800', letterSpacing: -0.6 },
+  copy: { color: c.muted, fontSize: 16, lineHeight: 23 },
+  card: { backgroundColor: c.surface, borderColor: c.border, borderRadius: 22, borderWidth: 1, gap: 14, padding: 16 },
+  emptyCard: { backgroundColor: c.surfaceRaised, borderColor: c.border, borderRadius: 22, borderWidth: 1, gap: 8, padding: 16 },
+  cardTitle: { color: c.text, fontSize: 18, fontWeight: '800' },
+  meta: { color: c.muted, fontSize: 14, lineHeight: 20, marginTop: 6 },
   row: { alignItems: 'flex-start', flexDirection: 'row', gap: 12, justifyContent: 'space-between' },
   flex: { flex: 1 },
   typePill: {
-    backgroundColor: '#e0f2fe',
+    backgroundColor: c.secondary,
     borderRadius: 999,
-    color: '#075985',
+    color: c.onSecondary,
     fontSize: 13,
     fontWeight: '800',
     overflow: 'hidden',
@@ -108,6 +111,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     textTransform: 'uppercase',
   },
-  primaryButton: { alignItems: 'center', backgroundColor: '#0f172a', borderRadius: 16, minHeight: 48, justifyContent: 'center' },
-  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  primaryButton: { alignItems: 'center', backgroundColor: c.primary, borderRadius: 16, minHeight: 48, justifyContent: 'center' },
+  primaryButtonText: { color: c.onPrimary, fontSize: 16, fontWeight: '800' },
 });

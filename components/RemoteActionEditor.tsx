@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'expo-router';
-import { Switch, Text, View } from 'react-native';
-import { Choice, Field, formStyles as styles } from './FormControls';
+import { Text, View } from 'react-native';
+import { Choice, Field, Switch, useFormStyles } from './FormControls';
 import { SessionPicker } from './SessionPicker';
 import { origins } from '@/src/core/origins';
 import type { OriginSummary } from '@/src/core/originRepository';
 import type { AgentActionPayload, HandyActionPayload, HttpActionPayload, WorkspaceSearchActionPayload } from '@/src/core/handyModel';
 
 export function RemoteActionEditor({ value, onChange }: { value: HttpActionPayload | AgentActionPayload | WorkspaceSearchActionPayload; onChange(value: HandyActionPayload): void }) {
+  const styles = useFormStyles();
   const [profiles, setProfiles] = useState<OriginSummary[]>([]);
   const [message,setMessage] = useState('');
   useEffect(()=>{ void origins.list().then(setProfiles).catch(()=>setMessage('Could not load secure connections.')); },[]);
-  return <View style={styles.card}><Text style={styles.label}>Origin</Text><Link href="/origins">Manage origins and headers</Link>
+  return <View style={styles.card}><Text style={styles.label}>Origin</Text><Link style={styles.link} href="/origins">Manage origins and headers</Link>
     <View style={styles.row}>{profiles.map(p=><Choice key={p.id} label={p.name} selected={value.originId===p.id} onPress={()=>onChange(value.type==='vd-agent' ? { ...value, originId:p.id, session:undefined } : { ...value, originId:p.id })} />)}</View>
     <Choice label="Refresh connections" onPress={()=>{void origins.list().then(setProfiles).catch(()=>setMessage('Could not load connections.'));}} />
     {value.originId && !profiles.some(p=>p.id===value.originId) ? <Text style={styles.copy}>This action needs to be reconnected to a local origin.</Text>:null}
