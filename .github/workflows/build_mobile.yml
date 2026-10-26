@@ -33,9 +33,32 @@ on:
         description: Output EAS build logs
         type: boolean
         default: false
+      inspect_eas_build_id:
+        description: Retrieve diagnostics for an existing EAS build instead of building
+        type: string
+        required: false
 
 jobs:
+  diagnostics:
+    if: ${{ inputs.inspect_eas_build_id != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Retrieve EAS build diagnostics
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_BUILD_ID: ${{ inputs.inspect_eas_build_id }}
+        run: node .github/scripts/eas-build-diagnostics.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eas-build-diagnostics
+          path: eas-build-diagnostics
+          retention-days: 7
   mobile:
+    if: ${{ inputs.inspect_eas_build_id == '' }}
     strategy:
       fail-fast: false
       matrix:
