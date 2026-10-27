@@ -1,5 +1,5 @@
 import { Button, HStack, Image, Link, Text, VStack } from '@expo/ui/swift-ui';
-import { activityBackgroundTint, background, buttonStyle, cornerRadius, font, foregroundStyle, frame, lineLimit, padding } from '@expo/ui/swift-ui/modifiers';
+import { activityBackgroundTint, background, buttonStyle, contentShape, cornerRadius, font, foregroundStyle, frame, lineLimit, padding, shapes } from '@expo/ui/swift-ui/modifiers';
 import { createLiveActivity, type LiveActivityEnvironment } from 'expo-widgets';
 import type { LiveActivityActionLink } from '@/src/core/handyModel';
 import type { SharedActivityConfiguration } from '@/src/core/sharedActivityModel';
@@ -30,11 +30,14 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
     // Reclaim the preset heading for the Actions footer. Titled result pages
     // keep a shorter footer so three workspace/search rows still fit.
     const navigationHeight = props.view === 'actions' ? 44 : 32;
-    return <VStack spacing={3} modifiers={[padding({ all: 5 })]}>
+    const navigationInset = props.view === 'actions' ? 4 : 0;
+    return <VStack spacing={props.view === 'actions' ? 6 : 3} modifiers={[padding({ all: props.view === 'actions' ? 6 : 5 })]}>
       {props.view !== 'actions' ? <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1)]}>{props.title}</Text> : null}
-      {!props.message ? (props.rows ?? []).map((row, index) => <HStack key={index} spacing={4}>
+      {!props.message ? (props.rows ?? []).map((row, index) => <HStack key={index} spacing={6}>
         {row.map(action => {
-          const label = <HStack spacing={4} modifiers={[padding({ horizontal: 5 }), frame({ minWidth: 0, maxWidth: 10000, minHeight: 44, maxHeight: 44 }), background(tile), cornerRadius(10)]}>
+          // Inset the visible tile inside a full-height hit area. The rectangle
+          // content shape keeps transparent padding tappable too.
+          const label = <HStack spacing={4} modifiers={[padding({ horizontal: 6 }), frame({ minWidth: 0, maxWidth: 10000, minHeight: 36, maxHeight: 36 }), background(tile), cornerRadius(8), padding({ horizontal: 2, vertical: 4 }), contentShape(shapes.rectangle())]}>
             {action.solidGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Free-Solid', size: 13 }), foregroundStyle(highlight)]}>{action.solidGlyph}</Text>
               : action.siteGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Brands-Regular', size: 13 }), foregroundStyle(highlight)]}>{action.siteGlyph}</Text>
               : <Image systemName={action.systemImage ?? (action.captureTarget ? 'square.and.pencil' : 'arrow.up.right')} color={highlight} size={13} />}
@@ -53,8 +56,8 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
       {props.message ? <Text modifiers={[font({ size: 12 }), foregroundStyle(ink), lineLimit(3)]}>{props.message}</Text> : null}
       {props.responseText ? <Text modifiers={[font({size:12}),foregroundStyle(ink),lineLimit(3)]}>{props.responseText}</Text> : null}
       {props.responseLinks?.length ? <HStack spacing={5}>{props.responseLinks.map(link=><Link key={link.url} destination={link.url}><Text modifiers={[font({size:11}),foregroundStyle(highlight),lineLimit(1)]}>{link.title}</Text></Link>)}</HStack> : null}
-      <HStack spacing={4}>{props.navigation.map(control => <Button key={control.target} target={control.target} modifiers={[buttonStyle('plain'), frame({ minWidth: 44, maxWidth: 10000 })]}>
-        <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1), padding({ horizontal: 6 }), frame({ minWidth: 44, maxWidth: 10000, minHeight: navigationHeight, maxHeight: navigationHeight }), background(tile), cornerRadius(10)]}>{control.title}</Text>
+      <HStack spacing={props.view === 'actions' ? 8 : 4}>{props.navigation.map(control => <Button key={control.target} target={control.target} modifiers={[buttonStyle('plain'), frame({ minWidth: 44, maxWidth: 10000 })]}>
+        <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1), padding({ horizontal: 6 }), frame({ minWidth: 44, maxWidth: 10000, minHeight: navigationHeight - navigationInset * 2, maxHeight: navigationHeight - navigationInset * 2 }), background(tile), cornerRadius(8), padding({ horizontal: navigationInset ? 2 : 0, vertical: navigationInset }), contentShape(shapes.rectangle())]}>{control.title}</Text>
       </Button>)}</HStack>
     </VStack>;
   };

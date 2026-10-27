@@ -16,7 +16,10 @@ The Actions grid omits the preset heading and uses a 44-point-high navigation
 footer with full-cell buttons. Titled workspace/search/reply views use a
 32-point-high footer to fit their content. Flexible width and height constraints
 are specified together so button backgrounds and tap areas expand beyond the
-text instead of shrinking to the label.
+text instead of shrinking to the label. In Actions, visible tiles are inset to
+36 points high inside 44-point hit areas, with wider column/row spacing so the
+six actions and footer read as separate controls. Transparent tile padding is
+included in the rectangular hit area.
 
 ### Shared activity ownership and recent workspaces
 
