@@ -12,6 +12,12 @@ In **Settings → Lock-screen experiments**, independently enable **Live Activit
 
 Saved preset/action/theme/surface/origin changes automatically refresh relevant content. **Refresh lock screen** remains available for explicit renewal. Put Add Note first to compare it across widget sizes and the Actions view.
 
+The Actions grid omits the preset heading and uses a 44-point-high navigation
+footer with full-cell buttons. Titled workspace/search/reply views use a
+32-point-high footer to fit their content. Flexible width and height constraints
+are specified together so button backgrounds and tap areas expand beyond the
+text instead of shrinking to the label.
+
 ### Shared activity ownership and recent workspaces
 
 `HandyActivityCoordinator` is the single native host owner for creation, updates, navigation and renewal. JavaScript sends configuration/data to protected host storage; native intents and query callbacks use the same serialized lifecycle path. The activity payload contains only the visible page and short revision-checked capture references, with a serialized content budget below ActivityKit’s 4 KB limit. The renderer is `SharedHandyActivity`; the former preset, recent-workspace and search activity renderers are retired. On migration, old Handy Actions-owned activities are ended before the shared one is created. If retirement is incomplete, another activity is not started.

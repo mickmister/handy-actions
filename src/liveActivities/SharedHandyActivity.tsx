@@ -27,11 +27,14 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
     const ink = island || dark ? '#F3F6F7' : '#172D36';
     const tile = island || subdued ? '#1A2931' : props.theme?.tile ?? '#1A2931';
     const highlight = island && !dark ? '#A7F3D0' : accent;
+    // Reclaim the preset heading for the Actions footer. Titled result pages
+    // keep a shorter footer so three workspace/search rows still fit.
+    const navigationHeight = props.view === 'actions' ? 44 : 32;
     return <VStack spacing={3} modifiers={[padding({ all: 5 })]}>
-      <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1)]}>{props.title}</Text>
+      {props.view !== 'actions' ? <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1)]}>{props.title}</Text> : null}
       {!props.message ? (props.rows ?? []).map((row, index) => <HStack key={index} spacing={4}>
         {row.map(action => {
-          const label = <HStack spacing={4} modifiers={[padding({ horizontal: 5 }), frame({ minWidth: 0, maxWidth: 10000, height: 44 }), background(tile), cornerRadius(10)]}>
+          const label = <HStack spacing={4} modifiers={[padding({ horizontal: 5 }), frame({ minWidth: 0, maxWidth: 10000, minHeight: 44, maxHeight: 44 }), background(tile), cornerRadius(10)]}>
             {action.solidGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Free-Solid', size: 13 }), foregroundStyle(highlight)]}>{action.solidGlyph}</Text>
               : action.siteGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Brands-Regular', size: 13 }), foregroundStyle(highlight)]}>{action.siteGlyph}</Text>
               : <Image systemName={action.systemImage ?? (action.captureTarget ? 'square.and.pencil' : 'arrow.up.right')} color={highlight} size={13} />}
@@ -42,7 +45,7 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
         })}
       </HStack>) : null}
       {!props.message ? (props.results ?? []).map(result => <Button key={result.target} target={result.target} modifiers={[buttonStyle('plain'), frame({ minWidth: 0, maxWidth: 10000 })]}>
-        <HStack spacing={6} modifiers={[padding({ horizontal: 8 }), frame({ minWidth: 0, maxWidth: 10000, height: 30 }), background(tile), cornerRadius(8)]}>
+        <HStack spacing={6} modifiers={[padding({ horizontal: 8 }), frame({ minWidth: 0, maxWidth: 10000, minHeight: 30, maxHeight: 30 }), background(tile), cornerRadius(8)]}>
           {result.solidGlyph ? <Text modifiers={[font({family:'FontAwesome6Free-Solid',size:13}),foregroundStyle(highlight)]}>{result.solidGlyph}</Text> : <Image systemName="folder" color={highlight} size={13} />}
           <Text modifiers={[font({ size: 13, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1), frame({ minWidth: 0, maxWidth: 10000, alignment: 'leading' })]}>{result.title}</Text>
         </HStack>
@@ -50,8 +53,8 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
       {props.message ? <Text modifiers={[font({ size: 12 }), foregroundStyle(ink), lineLimit(3)]}>{props.message}</Text> : null}
       {props.responseText ? <Text modifiers={[font({size:12}),foregroundStyle(ink),lineLimit(3)]}>{props.responseText}</Text> : null}
       {props.responseLinks?.length ? <HStack spacing={5}>{props.responseLinks.map(link=><Link key={link.url} destination={link.url}><Text modifiers={[font({size:11}),foregroundStyle(highlight),lineLimit(1)]}>{link.title}</Text></Link>)}</HStack> : null}
-      <HStack spacing={4}>{props.navigation.map(control => <Button key={control.target} target={control.target} modifiers={[buttonStyle('plain'), frame({ minWidth: 0, maxWidth: 10000 })]}>
-        <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1), frame({ minWidth: 0, maxWidth: 10000, height: 26 }), background(tile), cornerRadius(8)]}>{control.title}</Text>
+      <HStack spacing={4}>{props.navigation.map(control => <Button key={control.target} target={control.target} modifiers={[buttonStyle('plain'), frame({ minWidth: 44, maxWidth: 10000 })]}>
+        <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1), padding({ horizontal: 6 }), frame({ minWidth: 44, maxWidth: 10000, minHeight: navigationHeight, maxHeight: navigationHeight }), background(tile), cornerRadius(10)]}>{control.title}</Text>
       </Button>)}</HStack>
     </VStack>;
   };
