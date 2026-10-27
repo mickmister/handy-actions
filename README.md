@@ -56,6 +56,12 @@ stopped notification also offers **Reply** when expanded, and its body opens the
 VD workspace in the browser. Replies send exactly the entered text to that same
 session, without the original action prefix.
 
+The activity's **Reply** control posts a new notification; it cannot force the
+keyboard open inside the Live Activity. The selected reply shows posted/failed
+feedback. Expand the new notification and choose **Reply** to type. Reply captures
+use a nonempty synthetic `agent-replies` context rather than a saved preset, and
+reject a changed origin instead of silently retargeting the captured session.
+
 Host-only protected `HandyAgentReplies-v1` records retain immediate-send process
 IDs and exact destination snapshots. The host reads normalized-log WebSockets for
 assistant text and separately verifies process status; Ready, stream closure and

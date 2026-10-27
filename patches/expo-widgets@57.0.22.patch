@@ -1,9 +1,9 @@
 diff --git a/ios/HandyActivityCoordinator.swift b/ios/HandyActivityCoordinator.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..ed8a95fcb5cf4548f3f29ef0f1a5a6daadf2c49b
+index 0000000000000000000000000000000000000000..b2a62eaae80f1f15135e8035ae3ace6ea87d0713
 --- /dev/null
 +++ b/ios/HandyActivityCoordinator.swift
-@@ -0,0 +1,371 @@
+@@ -0,0 +1,394 @@
 +import ActivityKit
 +import Foundation
 +import UIKit
@@ -29,6 +29,7 @@ index 0000000000000000000000000000000000000000..ed8a95fcb5cf4548f3f29ef0f1a5a6da
 +    var recentPage: Int?
 +    var replyPage: Int?
 +    var replyId: String?
++    var replyInputStatus: String?
 +    var searchId: String?
 +    var searchProps: String?
 +  }
@@ -138,6 +139,18 @@ index 0000000000000000000000000000000000000000..ed8a95fcb5cf4548f3f29ef0f1a5a6da
 +      try await reconcile(state, allowStart: false)
 +    }
 +  }
++  @available(iOS 17.0, *)
++  private static func replyInputFeedback(_ id: String, _ message: String) async {
++    try? await transaction {
++      var state = try read()
++      guard state.replyId == id else { return }
++      state.replyInputStatus = message
++      try save(state)
++      if !activities().filter({ $0.content.state.name == name }).isEmpty {
++        try await reconcile(state, allowStart: false)
++      }
++    }
++  }
 +  @available(iOS 16.2, *)
 +  static func beginSearch(id: String, props: [String: Any]) async throws {
 +    try await transaction {
@@ -209,6 +222,7 @@ index 0000000000000000000000000000000000000000..ed8a95fcb5cf4548f3f29ef0f1a5a6da
 +        props["title"] = String((selected["label"] as? String ?? "Agent").prefix(60)) + " · " + (selected["status"] as? String ?? "")
 +        let text = selected["excerpt"] as? String ?? ""
 +        props["responseText"] = text.isEmpty ? "Waiting for verified agent response…" : text
++        if let status = state.replyInputStatus { props["inputStatus"] = status }
 +        props["responseLinks"] = (selected["links"] as? [String] ?? []).prefix(3).map { ["title": URL(string: $0)?.host ?? "Open link", "url": $0] }
 +        navigation.append(try control("‹ Replies", "reply-list"))
 +        navigation.append(try control("Reply", "reply-send", ["id": id]))
@@ -313,9 +327,9 @@ index 0000000000000000000000000000000000000000..ed8a95fcb5cf4548f3f29ef0f1a5a6da
 +      guard config["enabled"] as? Bool == true else { throw Failure(message: "Live Activities are disabled in Handy Actions.") }
 +      let operation = value["operation"] as? String ?? ""
 +      if operation == "reply-open", let id = value["id"] as? String {
-+        try HandyAgentReplies.markRead(id); state.replyId = id; state.view = "replies"
++        try HandyAgentReplies.markRead(id); state.replyId = id; state.replyInputStatus = nil; state.view = "replies"
 +      }
-+      if operation == "reply-list" { state.replyId = nil }
++      if operation == "reply-list" { state.replyId = nil; state.replyInputStatus = nil }
 +      if operation == "reply-page", let direction = value["direction"] as? Int, [-1, 1].contains(direction) {
 +        let count = try HandyAgentReplies.snapshots().count
 +        state.replyPage = max(0, min((state.replyPage ?? 0) + direction, max(0, (count - 1) / 3)))
@@ -366,7 +380,16 @@ index 0000000000000000000000000000000000000000..ed8a95fcb5cf4548f3f29ef0f1a5a6da
 +      try await reconcile(state, allowStart: true)
 +      return [:]
 +    }
-+    if let replyId = command["replyId"] as? String { try await HandyAgentReplies.reply(replyId) }
++    if let replyId = command["replyId"] as? String {
++      do {
++        try await HandyAgentReplies.reply(replyId)
++        await replyInputFeedback(replyId, "Reply notification posted. Expand it and choose Reply to type.")
++      } catch {
++        let message = (error as? Failure)?.message ?? "Reply notification could not be posted. Check notification permission in Handy Actions and try again."
++        await replyInputFeedback(replyId, message)
++        throw error
++      }
++    }
 +    else if let capture = command["captureTarget"] as? String {
 +      if capture.hasPrefix("handy-workspace-search-v1:") { try await HandyWorkspaceSearch.perform(capture) }
 +      else { _ = try await HandyNoteCapture.post(target: capture) }
@@ -377,10 +400,10 @@ index 0000000000000000000000000000000000000000..ed8a95fcb5cf4548f3f29ef0f1a5a6da
 +}
 diff --git a/ios/HandyAgentReplies.swift b/ios/HandyAgentReplies.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..10eeb0cd8ab77fa8e0bebf840fa560c694dfa042
+index 0000000000000000000000000000000000000000..e684736363896351e7433fe54cf0da9cd24b6d50
 --- /dev/null
 +++ b/ios/HandyAgentReplies.swift
-@@ -0,0 +1,360 @@
+@@ -0,0 +1,369 @@
 +import ActivityKit
 +import CryptoKit
 +import Foundation
@@ -700,14 +723,23 @@ index 0000000000000000000000000000000000000000..10eeb0cd8ab77fa8e0bebf840fa560c6
 +    if #available(iOS 17.0, *) { try await HandyActivityCoordinator.publishReplies() }
 +  }
 +  static func markRead(_ id: String) throws { var watch = try read(id); watch.unread = false; try save(watch) }
++  @available(iOS 17.0, *)
 +  static func reply(_ id: String) async throws {
 +    let watch = try read(id)
++    let profile = try HandyBackgroundDelivery().profile(watch.originId)
++    guard profile["origin"] as? String == watch.origin else {
++      throw HandyActivityCoordinator.Failure(message: "This connection changed. Review the session in Handy Actions before replying.")
++    }
 +    let target = try object(watch.target)
 +    let payload: [String: Any] = ["type": "vd-agent", "originId": watch.originId, "prefix": "", "session": target]
 +    let actionId = UUID().uuidString
 +    let rows: [[String: Any]] = [["id": actionId, "title": "Reply to agent", "payload": payload]]
-+    let capture: [String: Any] = ["actionId": actionId, "presetId": "", "title": target["label"] as? String ?? "Agent reply", "actions": try encode(rows), "backgroundRequest": true, "workspaceBrowserUrl": "\(watch.origin)/workspaces/\(path(target["workspaceId"] as? String ?? ""))"]
-+    if #available(iOS 17.0, *) { _ = try await HandyNoteCapture.post(target: "handy-note-capture-v1:" + encode(capture)) }
++    // The capture helper requires a nonempty context even though replies are
++    // snapshot-backed and do not belong to a saved preset.
++    let capture: [String: Any] = ["actionId": actionId, "presetId": "agent-replies", "title": target["label"] as? String ?? "Agent reply", "actions": try encode(rows), "backgroundRequest": true, "replyToAgent": true, "workspaceBrowserUrl": "\(watch.origin)/workspaces/\(path(target["workspaceId"] as? String ?? ""))"]
++    guard try await HandyNoteCapture.post(target: "handy-note-capture-v1:" + encode(capture)) else {
++      throw HandyActivityCoordinator.Failure(message: "Could not prepare the reply notification. Open Handy Actions and try again.")
++    }
 +  }
 +  private static func notify(_ id: String) async throws {
 +    var watch = try read(id)
@@ -1504,7 +1536,7 @@ index 0000000000000000000000000000000000000000..28ddb7f38a19bd9bb6cea7ccf26ee59b
 +  }
 +}
 diff --git a/ios/Widgets/AppIntent.swift b/ios/Widgets/AppIntent.swift
-index 972fa4f190d5da8f961218bcbe2436964ac34acf..2c9f82af878a248709366f4fd63250b55a73a97d 100644
+index 972fa4f190d5da8f961218bcbe2436964ac34acf..6e8bc8fc90cd945c44984aef3bfa4d307a821236 100644
 --- a/ios/Widgets/AppIntent.swift
 +++ b/ios/Widgets/AppIntent.swift
 @@ -1,5 +1,6 @@
@@ -1546,7 +1578,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..2c9f82af878a248709366f4fd63250b5
      WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
        "source": source as Any,
        "target": target as Any,
-@@ -128,3 +147,110 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+@@ -128,3 +147,115 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
      return .result()
    }
  }
@@ -1568,6 +1600,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..2c9f82af878a248709366f4fd63250b5
 +    let actions: String
 +    let localSave: Bool?
 +    let backgroundRequest: Bool?
++    let replyToAgent: Bool?
 +    let workspaceBrowserUrl: String?
 +  }
 +
@@ -1605,10 +1638,14 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..2c9f82af878a248709366f4fd63250b5
 +      (payload["type"] as? String == "http" && payload["captureText"] as? Bool == true) ||
 +      (payload["type"] as? String == "vd-agent" && payload["session"] is [String: Any])
 +    )
-+    let selectedCategory = localSave ? "handy-text-input-local-v1" : backgroundRequest ? "handy-text-input-background-v1" : categoryID
++    let agentReply = capture.replyToAgent == true && backgroundRequest && payload["type"] as? String == "vd-agent"
++    guard capture.replyToAgent != true || agentReply else {
++      throw NSError(domain: "HandyNoteCapture", code: 1, userInfo: [NSLocalizedDescriptionKey: "Choose a fixed agent session before replying."])
++    }
++    let selectedCategory = agentReply ? "handy-agent-reply-v1" : localSave ? "handy-text-input-local-v1" : backgroundRequest ? "handy-text-input-background-v1" : categoryID
 +    let reply = UNTextInputNotificationAction(
-+      identifier: "handy-input-submit", title: "Add Note", options: localSave || backgroundRequest ? [] : [.foreground],
-+      textInputButtonTitle: localSave ? "Save" : "Send", textInputPlaceholder: "Write a note…"
++      identifier: "handy-input-submit", title: agentReply ? "Reply" : "Add Note", options: localSave || backgroundRequest ? [] : [.foreground],
++      textInputButtonTitle: localSave ? "Save" : "Send", textInputPlaceholder: agentReply ? "Reply to this session" : "Write a note…"
 +    )
 +    let category = UNNotificationCategory(
 +      identifier: selectedCategory, actions: [reply], intentIdentifiers: [], options: []
@@ -1629,7 +1666,7 @@ index 972fa4f190d5da8f961218bcbe2436964ac34acf..2c9f82af878a248709366f4fd63250b5
 +
 +    let submissionID = UUID().uuidString
 +    let notificationID = "handy-input-\(submissionID)"
-+    let body = capture.workspaceBrowserUrl == nil ? "Expand and select Add Note to type, or tap this notification to open the editor." : "Expand and select Add Note to send a message. Tap this notification to open the workspace in your browser."
++    let body = agentReply ? "Expand and choose Reply to send a message to this session. Tap this notification to open the workspace in your browser." : capture.workspaceBrowserUrl == nil ? "Expand and select Add Note to type, or tap this notification to open the editor." : "Expand and select Add Note to send a message. Tap this notification to open the workspace in your browser."
 +    var data: [String: String] = [
 +      "captureActionId": capture.actionId, "presetId": capture.presetId,
 +      "submissionId": submissionID, "actions": capture.actions

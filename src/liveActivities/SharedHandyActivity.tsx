@@ -11,6 +11,7 @@ export type SharedHandyActivityProps = {
   rows?: LiveActivityActionLink[][];
   results?: { title: string; target: string; solidGlyph?: string }[];
   responseText?: string;
+  inputStatus?: string;
   responseLinks?: {title:string;url:string}[];
   primarySolidGlyph?: string;
   navigation: { title: string; target: string }[];
@@ -55,6 +56,7 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
       </Button>) : null}
       {props.message ? <Text modifiers={[font({ size: 12 }), foregroundStyle(ink), lineLimit(3)]}>{props.message}</Text> : null}
       {props.responseText ? <Text modifiers={[font({size:12}),foregroundStyle(ink),lineLimit(3)]}>{props.responseText}</Text> : null}
+      {props.inputStatus ? <Text modifiers={[font({size:11}),foregroundStyle(highlight),lineLimit(2)]}>{props.inputStatus}</Text> : null}
       {props.responseLinks?.length ? <HStack spacing={5}>{props.responseLinks.map(link=><Link key={link.url} destination={link.url}><Text modifiers={[font({size:11}),foregroundStyle(highlight),lineLimit(1)]}>{link.title}</Text></Link>)}</HStack> : null}
       <HStack spacing={props.view === 'actions' ? 8 : 4}>{props.navigation.map(control => <Button key={control.target} target={control.target} modifiers={[buttonStyle('plain'), frame({ minWidth: 44, maxWidth: 10000 })]}>
         <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1), padding({ horizontal: 6 }), frame({ minWidth: 44, maxWidth: 10000, minHeight: navigationHeight - navigationInset * 2, maxHeight: navigationHeight - navigationInset * 2 }), background(tile), cornerRadius(8), padding({ horizontal: navigationInset ? 2 : 0, vertical: navigationInset }), contentShape(shapes.rectangle())]}>{control.title}</Text>
