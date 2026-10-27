@@ -1,9 +1,9 @@
 diff --git a/ios/HandyActivityCoordinator.swift b/ios/HandyActivityCoordinator.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..d12f35141c727690483500564b24915028e178a0
+index 0000000000000000000000000000000000000000..ed8a95fcb5cf4548f3f29ef0f1a5a6daadf2c49b
 --- /dev/null
 +++ b/ios/HandyActivityCoordinator.swift
-@@ -0,0 +1,342 @@
+@@ -0,0 +1,371 @@
 +import ActivityKit
 +import Foundation
 +import UIKit
@@ -15,6 +15,8 @@ index 0000000000000000000000000000000000000000..d12f35141c727690483500564b249150
 +enum HandyActivityCoordinator {
 +  static let name = "SharedHandyActivity"
 +  static let prefix = "handy-activity-v1:"
++  private static let actionPageSize = 6
++  private static let actionColumns = 3
 +  private static var tail: Task<Void, Never>?
 +  private struct State: Codable {
 +    var configuration = "{}"
@@ -67,7 +69,7 @@ index 0000000000000000000000000000000000000000..d12f35141c727690483500564b249150
 +      state.presetId = presets.first?["id"] as? String ?? ""; state.page = 0
 +    }
 +    let actions = presets.first(where: { $0["id"] as? String == state.presetId })?["actions"] as? [[String: Any]] ?? []
-+    state.page = max(0, min(state.page, max(0, (actions.count - 1) / 4)))
++    state.page = max(0, min(state.page, max(0, (actions.count - 1) / actionPageSize)))
 +    let recent = config["recent"] as? [String: Any]
 +    // A loading placeholder has no rows yet; don't mistake it for a shrunken list.
 +    if recent?["loading"] as? Bool != true {
@@ -248,22 +250,29 @@ index 0000000000000000000000000000000000000000..d12f35141c727690483500564b249150
 +      if let index = presets.firstIndex(where: { $0["id"] as? String == state.presetId }) {
 +        let preset = presets[index]
 +        let actions = preset["actions"] as? [[String: Any]] ?? []
-+        let start = state.page * 4
-+        props["title"] = String((preset["name"] as? String ?? "Actions").prefix(60)) + " · \(state.page + 1)/\(max(1, (actions.count + 3) / 4))"
++        let start = state.page * actionPageSize
++        let pageCount = max(1, (actions.count + actionPageSize - 1) / actionPageSize)
++        props["title"] = String((preset["name"] as? String ?? "Actions").prefix(60)) + (pageCount > 1 ? " · \(state.page + 1)/\(pageCount)" : "")
 +        var rows: [[[String: Any]]] = []
-+        for action in actions.dropFirst(start).prefix(4) {
++        for (offset, action) in actions.dropFirst(start).prefix(actionPageSize).enumerated() {
 +          var link: [String: Any] = ["title": String((action["title"] as? String ?? "Action").prefix(48)), "url": action["url"] as? String ?? config["openUrl"] as? String ?? ""]
-+          if action["captureTarget"] is String { link["captureTarget"] = try target(state, "action", ["presetId": state.presetId, "actionId": action["id"] as? String ?? ""]) }
++          if action["captureTarget"] is String {
++            link["captureTarget"] = try target(state, "action", ["presetIndex": index, "actionIndex": start + offset])
++            // Buttons use url only as their React key. Keep the full fallback URL
++            // in protected host configuration instead of duplicating it six times
++            // in ActivityKit's bounded payload. Link actions retain their real URL.
++            link["url"] = "capture:\(index):\(start + offset)"
++          }
 +          if let glyph = action["siteGlyph"] { link["siteGlyph"] = glyph }
 +          if let glyph = action["solidGlyph"] { link["solidGlyph"] = glyph }
 +          if let symbol = action["systemImage"] { link["systemImage"] = symbol }
-+          if rows.isEmpty || rows[rows.count - 1].count == 2 { rows.append([]) }
++          if rows.isEmpty || rows[rows.count - 1].count == actionColumns { rows.append([]) }
 +          rows[rows.count - 1].append(link)
 +        }
 +        props["rows"] = rows
 +        if let glyph = rows.first?.first?["solidGlyph"] { props["primarySolidGlyph"] = glyph }
 +        if state.page > 0 || index > 0 { navigation.append(try control("‹", "page", ["direction": -1])) }
-+        if start + 4 < actions.count || index + 1 < presets.count { navigation.append(try control("›", "page", ["direction": 1])) }
++        if start + actionPageSize < actions.count || index + 1 < presets.count { navigation.append(try control("›", "page", ["direction": 1])) }
 +      } else { props["message"] = "Enable a preset with actions in the app." }
 +      navigation.insert(try control("Workspaces", "view", ["view": "workspaces"]), at: 0)
 +      if state.searchId != nil { navigation.append(try control("Search", "view", ["view": "search"])) }
@@ -273,7 +282,17 @@ index 0000000000000000000000000000000000000000..d12f35141c727690483500564b249150
 +      navigation.append(try control(unread > 0 ? "Replies (\(unread))" : "Replies", "view", ["view": "replies"]))
 +    }
 +    props["navigation"] = navigation
-+    let bytes = try JSONSerialization.data(withJSONObject: ["name": name, "props": try encode(props)])
++    var bytes = try JSONSerialization.data(withJSONObject: ["name": name, "props": try encode(props)])
++    if bytes.count > 3400, let rows = props["rows"] as? [[[String: Any]]] {
++      // Compact visible labels before giving up any controls. Full names and
++      // destinations remain in the protected host snapshot.
++      props["rows"] = rows.map { row in row.map { action in
++        var compact = action
++        compact["title"] = String((action["title"] as? String ?? "Action").prefix(24))
++        return compact
++      } }
++      bytes = try JSONSerialization.data(withJSONObject: ["name": name, "props": try encode(props)])
++    }
 +    if bytes.count > 3400 {
 +      props.removeValue(forKey: "rows"); props.removeValue(forKey: "results")
 +      props.removeValue(forKey: "responseLinks"); props.removeValue(forKey: "responseText")
@@ -304,8 +323,18 @@ index 0000000000000000000000000000000000000000..d12f35141c727690483500564b249150
 +      if operation == "reply-send", let id = value["id"] as? String { return ["replyId": id] }
 +      if operation == "action" {
 +        let presets = config["presets"] as? [[String: Any]] ?? []
-+        let preset = presets.first { $0["id"] as? String == value["presetId"] as? String }
-+        guard let action = (preset?["actions"] as? [[String: Any]])?.first(where: { $0["id"] as? String == value["actionId"] as? String }), let target = action["captureTarget"] as? String else { throw Failure(message: "This action changed. Refresh the activity.") }
++        let action: [String: Any]?
++        if let presetIndex = value["presetIndex"] as? Int, let actionIndex = value["actionIndex"] as? Int, presets.indices.contains(presetIndex) {
++          let actions = presets[presetIndex]["actions"] as? [[String: Any]] ?? []
++          action = actions.indices.contains(actionIndex) ? actions[actionIndex] : nil
++        } else {
++          // Accept references already displayed by the previous native binary.
++          let preset = presets.first { $0["id"] as? String == value["presetId"] as? String }
++          action = (preset?["actions"] as? [[String: Any]])?.first { $0["id"] as? String == value["actionId"] as? String }
++        }
++        // The revision guard above fixes both indices to this exact configuration,
++        // including when a control is tapped after navigating to another preset.
++        guard let target = action?["captureTarget"] as? String else { throw Failure(message: "This action changed. Refresh the activity.") }
 +        return ["captureTarget": target]
 +      }
 +      if operation == "recent" || operation == "search" {
@@ -328,8 +357,8 @@ index 0000000000000000000000000000000000000000..d12f35141c727690483500564b249150
 +          let count = (presets[index]["actions"] as? [Any] ?? []).count
 +          if direction < 0, state.page == 0, index > 0 {
 +            state.presetId = presets[index - 1]["id"] as? String ?? ""
-+            state.page = max(0, ((presets[index - 1]["actions"] as? [Any] ?? []).count - 1) / 4)
-+          } else if direction > 0, (state.page + 1) * 4 >= count, index + 1 < presets.count { state.presetId = presets[index + 1]["id"] as? String ?? ""; state.page = 0 }
++            state.page = max(0, ((presets[index - 1]["actions"] as? [Any] ?? []).count - 1) / actionPageSize)
++          } else if direction > 0, (state.page + 1) * actionPageSize >= count, index + 1 < presets.count { state.presetId = presets[index + 1]["id"] as? String ?? ""; state.page = 0 }
 +          else { state.page += direction }
 +        }
 +      }

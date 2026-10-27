@@ -29,13 +29,13 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
     const highlight = island && !dark ? '#A7F3D0' : accent;
     return <VStack spacing={3} modifiers={[padding({ all: 5 })]}>
       <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1)]}>{props.title}</Text>
-      {!props.message ? (props.rows ?? []).map((row, index) => <HStack key={index} spacing={5}>
+      {!props.message ? (props.rows ?? []).map((row, index) => <HStack key={index} spacing={4}>
         {row.map(action => {
-          const label = <HStack spacing={6} modifiers={[padding({ horizontal: 8 }), frame({ minWidth: 0, maxWidth: 10000, height: 44 }), background(tile), cornerRadius(12)]}>
-            {action.solidGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Free-Solid', size: 15 }), foregroundStyle(highlight)]}>{action.solidGlyph}</Text>
-              : action.siteGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Brands-Regular', size: 15 }), foregroundStyle(highlight)]}>{action.siteGlyph}</Text>
-              : <Image systemName={action.systemImage ?? (action.captureTarget ? 'square.and.pencil' : 'arrow.up.right')} color={highlight} size={14} />}
-            <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(2), frame({ minWidth: 0, maxWidth: 10000, alignment: 'leading' })]}>{action.title}</Text>
+          const label = <HStack spacing={4} modifiers={[padding({ horizontal: 5 }), frame({ minWidth: 0, maxWidth: 10000, height: 44 }), background(tile), cornerRadius(10)]}>
+            {action.solidGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Free-Solid', size: 13 }), foregroundStyle(highlight)]}>{action.solidGlyph}</Text>
+              : action.siteGlyph ? <Text modifiers={[font({ family: 'FontAwesome6Brands-Regular', size: 13 }), foregroundStyle(highlight)]}>{action.siteGlyph}</Text>
+              : <Image systemName={action.systemImage ?? (action.captureTarget ? 'square.and.pencil' : 'arrow.up.right')} color={highlight} size={13} />}
+            <Text modifiers={[font({ size: 11, weight: 'semibold' }), foregroundStyle(ink), lineLimit(2), frame({ minWidth: 0, maxWidth: 10000, alignment: 'leading' })]}>{action.title}</Text>
           </HStack>;
           return action.captureTarget ? <Button key={action.url} target={action.captureTarget} modifiers={[buttonStyle('plain'), frame({ minWidth: 0, maxWidth: 10000 })]}>{label}</Button>
             : <Link key={action.url} destination={action.url} modifiers={[frame({ minWidth: 0, maxWidth: 10000 })]}>{label}</Link>;
