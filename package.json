@@ -41,6 +41,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "test": "node --experimental-strip-types --test test/**/*.test.ts",
+    "test:native-reply-pages": "node scripts/test-native-reply-pages.cjs",
+    "eas-build-post-install": "node scripts/test-native-reply-pages.cjs",
     "typecheck": "tsc --noEmit"
   },
   "private": true

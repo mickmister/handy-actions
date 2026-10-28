@@ -62,6 +62,23 @@ feedback. Expand the new notification and choose **Reply** to type. Reply captur
 use a nonempty synthetic `agent-replies` context rather than a saved preset, and
 reject a changed origin instead of silently retargeting the captured session.
 
+Selected replies have **‹ / ›** text controls and **Page X of Y**, separate from
+the reply-list pages. Pages use a measured 240pt-wide, 12pt, three-line text region
+so the whole saved message remains reachable, including code, newlines and emoji.
+Streaming updates keep the selected page; reopening a reply starts at page 1.
+The full redacted normalized reply stays in protected host storage, with only the
+current page sent to ActivityKit. Finished replies replay normalized logs to
+recover full text instead of relying on VD's potentially shortened summary;
+older watches migrate without losing their saved excerpt. If replay is unavailable,
+the counter says **saved** and reopening retries recovery. Posting Reply input
+temporarily shows notification feedback in the text region; tap the page counter
+or a page arrow to resume reading. Long link metadata is omitted before sacrificing
+text/paging to ActivityKit's payload limit.
+
+`pnpm test:native-reply-pages` runs native CoreText layout, lossless Unicode,
+long-message and streaming-boundary tests on macOS. The same test is required by
+the iOS EAS post-install hook before building the signed app.
+
 Host-only protected `HandyAgentReplies-v1` records retain immediate-send process
 IDs and exact destination snapshots. The host reads normalized-log WebSockets for
 assistant text and separately verifies process status; Ready, stream closure and

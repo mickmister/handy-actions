@@ -11,6 +11,7 @@ export type SharedHandyActivityProps = {
   rows?: LiveActivityActionLink[][];
   results?: { title: string; target: string; solidGlyph?: string }[];
   responseText?: string;
+  responsePagination?: { label: string; previous?: string; next?: string; read?: string };
   inputStatus?: string;
   responseLinks?: {title:string;url:string}[];
   primarySolidGlyph?: string;
@@ -55,8 +56,18 @@ const SharedHandyActivity = (props: SharedHandyActivityProps, environment: LiveA
         </HStack>
       </Button>) : null}
       {props.message ? <Text modifiers={[font({ size: 12 }), foregroundStyle(ink), lineLimit(3)]}>{props.message}</Text> : null}
-      {props.responseText ? <Text modifiers={[font({size:12}),foregroundStyle(ink),lineLimit(3)]}>{props.responseText}</Text> : null}
-      {props.inputStatus ? <Text modifiers={[font({size:11}),foregroundStyle(highlight),lineLimit(2)]}>{props.inputStatus}</Text> : null}
+      {props.responseText || props.inputStatus ? <Text modifiers={[font({size:12}),foregroundStyle(props.inputStatus ? highlight : ink),lineLimit(3),frame({width:240,alignment:'leading'}),frame({minHeight:44,maxHeight:44,alignment:'leading'})]}>{props.inputStatus ?? props.responseText}</Text> : null}
+      {props.responsePagination ? <HStack spacing={8}>
+        {props.responsePagination.previous ? <Button target={props.responsePagination.previous} modifiers={[buttonStyle('plain')]}>
+          <Text modifiers={[font({size:15,weight:'semibold'}),foregroundStyle(highlight),frame({width:44,height:28}),background(tile),cornerRadius(6),contentShape(shapes.rectangle())]}>‹</Text>
+        </Button> : <Text modifiers={[frame({width:44,height:28})]}>{' '}</Text>}
+        {props.responsePagination.read ? <Button target={props.responsePagination.read} modifiers={[buttonStyle('plain')]}>
+          <Text modifiers={[font({size:11,weight:'semibold'}),foregroundStyle(highlight),padding({horizontal:6}),frame({minHeight:28,maxHeight:28}),background(tile),cornerRadius(6)]}>{props.responsePagination.label}</Text>
+        </Button> : <Text modifiers={[font({size:11,weight:'semibold'}),foregroundStyle(ink),lineLimit(1)]}>{props.responsePagination.label}</Text>}
+        {props.responsePagination.next ? <Button target={props.responsePagination.next} modifiers={[buttonStyle('plain')]}>
+          <Text modifiers={[font({size:15,weight:'semibold'}),foregroundStyle(highlight),frame({width:44,height:28}),background(tile),cornerRadius(6),contentShape(shapes.rectangle())]}>›</Text>
+        </Button> : <Text modifiers={[frame({width:44,height:28})]}>{' '}</Text>}
+      </HStack> : null}
       {props.responseLinks?.length ? <HStack spacing={5}>{props.responseLinks.map(link=><Link key={link.url} destination={link.url}><Text modifiers={[font({size:11}),foregroundStyle(highlight),lineLimit(1)]}>{link.title}</Text></Link>)}</HStack> : null}
       <HStack spacing={props.view === 'actions' ? 8 : 4}>{props.navigation.map(control => <Button key={control.target} target={control.target} modifiers={[buttonStyle('plain'), frame({ minWidth: 44, maxWidth: 10000 })]}>
         <Text modifiers={[font({ size: 12, weight: 'semibold' }), foregroundStyle(ink), lineLimit(1), padding({ horizontal: 6 }), frame({ minWidth: 44, maxWidth: 10000, minHeight: navigationHeight - navigationInset * 2, maxHeight: navigationHeight - navigationInset * 2 }), background(tile), cornerRadius(8), padding({ horizontal: navigationInset ? 2 : 0, vertical: navigationInset }), contentShape(shapes.rectangle())]}>{control.title}</Text>

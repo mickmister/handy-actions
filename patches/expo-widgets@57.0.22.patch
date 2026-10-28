@@ -1,9 +1,9 @@
 diff --git a/ios/HandyActivityCoordinator.swift b/ios/HandyActivityCoordinator.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..b2a62eaae80f1f15135e8035ae3ace6ea87d0713
+index 0000000000000000000000000000000000000000..be468de04b80575d5f1083b31921bcf01f6a7215
 --- /dev/null
 +++ b/ios/HandyActivityCoordinator.swift
-@@ -0,0 +1,394 @@
+@@ -0,0 +1,423 @@
 +import ActivityKit
 +import Foundation
 +import UIKit
@@ -28,6 +28,7 @@ index 0000000000000000000000000000000000000000..b2a62eaae80f1f15135e8035ae3ace6e
 +    // Optional for backward-compatible decoding of pre-pagination state files.
 +    var recentPage: Int?
 +    var replyPage: Int?
++    var replyTextPage: Int?
 +    var replyId: String?
 +    var replyInputStatus: String?
 +    var searchId: String?
@@ -220,8 +221,19 @@ index 0000000000000000000000000000000000000000..b2a62eaae80f1f15135e8035ae3ace6e
 +      let replies = try HandyAgentReplies.snapshots()
 +      if let id = state.replyId, let selected = replies.first(where: { $0["id"] as? String == id }) {
 +        props["title"] = String((selected["label"] as? String ?? "Agent").prefix(60)) + " · " + (selected["status"] as? String ?? "")
-+        let text = selected["excerpt"] as? String ?? ""
++        let snapshot = try HandyAgentReplies.textSnapshot(id)
++        let page = max(0, min(state.replyTextPage ?? 0, snapshot.pages.count - 1))
++        let text = snapshot.pages[page]
 +        props["responseText"] = text.isEmpty ? "Waiting for verified agent response…" : text
++        let saved = !snapshot.complete && ["completed", "failed", "killed"].contains(selected["status"] as? String ?? "")
++        var pagination = ["label": "Page \(page + 1) of \(snapshot.pages.count)" + (saved ? " · saved" : "")]
++        func textPageTarget(_ index: Int) throws -> String {
++          try target(state, "reply-text-page", ["id": id, "page": index, "textRevision": snapshot.revision])
++        }
++        if page > 0 { pagination["previous"] = try textPageTarget(page - 1) }
++        if page + 1 < snapshot.pages.count { pagination["next"] = try textPageTarget(page + 1) }
++        if state.replyInputStatus != nil { pagination["read"] = try textPageTarget(page) }
++        props["responsePagination"] = pagination
 +        if let status = state.replyInputStatus { props["inputStatus"] = status }
 +        props["responseLinks"] = (selected["links"] as? [String] ?? []).prefix(3).map { ["title": URL(string: $0)?.host ?? "Open link", "url": $0] }
 +        navigation.append(try control("‹ Replies", "reply-list"))
@@ -297,6 +309,11 @@ index 0000000000000000000000000000000000000000..b2a62eaae80f1f15135e8035ae3ace6e
 +    }
 +    props["navigation"] = navigation
 +    var bytes = try JSONSerialization.data(withJSONObject: ["name": name, "props": try encode(props)])
++    if bytes.count > 3400, props["responsePagination"] != nil {
++      // Long URLs must not displace the readable text or its paging controls.
++      props.removeValue(forKey: "responseLinks")
++      bytes = try JSONSerialization.data(withJSONObject: ["name": name, "props": try encode(props)])
++    }
 +    if bytes.count > 3400, let rows = props["rows"] as? [[[String: Any]]] {
 +      // Compact visible labels before giving up any controls. Full names and
 +      // destinations remain in the protected host snapshot.
@@ -327,9 +344,20 @@ index 0000000000000000000000000000000000000000..b2a62eaae80f1f15135e8035ae3ace6e
 +      guard config["enabled"] as? Bool == true else { throw Failure(message: "Live Activities are disabled in Handy Actions.") }
 +      let operation = value["operation"] as? String ?? ""
 +      if operation == "reply-open", let id = value["id"] as? String {
-+        try HandyAgentReplies.markRead(id); state.replyId = id; state.replyInputStatus = nil; state.view = "replies"
++        try HandyAgentReplies.markRead(id); state.replyId = id; state.replyTextPage = 0; state.replyInputStatus = nil; state.view = "replies"
 +      }
-+      if operation == "reply-list" { state.replyId = nil; state.replyInputStatus = nil }
++      if operation == "reply-list" { state.replyId = nil; state.replyTextPage = nil; state.replyInputStatus = nil }
++      if operation == "reply-text-page", state.view == "replies", let id = state.replyId,
++         value["id"] as? String == id, let page = value["page"] as? Int {
++        let snapshot = try HandyAgentReplies.textSnapshot(id)
++        // Absolute, reply-bound targets are idempotent. A streaming rewrite
++        // invalidates old text boundaries without jumping to another page/reply.
++        if value["textRevision"] as? String == snapshot.revision {
++          state.replyTextPage = max(0, min(page, snapshot.pages.count - 1))
++          state.replyInputStatus = nil
++          try HandyAgentReplies.markRead(id)
++        }
++      }
 +      if operation == "reply-page", let direction = value["direction"] as? Int, [-1, 1].contains(direction) {
 +        let count = try HandyAgentReplies.snapshots().count
 +        state.replyPage = max(0, min((state.replyPage ?? 0) + direction, max(0, (count - 1) / 3)))
@@ -378,9 +406,10 @@ index 0000000000000000000000000000000000000000..b2a62eaae80f1f15135e8035ae3ace6e
 +      }
 +      normalize(&state, config); try save(state)
 +      try await reconcile(state, allowStart: true)
-+      return [:]
++      return operation == "reply-open" ? ["loadReply": state.replyId ?? ""] : [:]
 +    }
-+    if let replyId = command["replyId"] as? String {
++    if let id = command["loadReply"] as? String { await HandyAgentReplies.loadFullText(id) }
++    else if let replyId = command["replyId"] as? String {
 +      do {
 +        try await HandyAgentReplies.reply(replyId)
 +        await replyInputFeedback(replyId, "Reply notification posted. Expand it and choose Reply to type.")
@@ -400,10 +429,10 @@ index 0000000000000000000000000000000000000000..b2a62eaae80f1f15135e8035ae3ace6e
 +}
 diff --git a/ios/HandyAgentReplies.swift b/ios/HandyAgentReplies.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..e684736363896351e7433fe54cf0da9cd24b6d50
+index 0000000000000000000000000000000000000000..952a8404ed2ccfffc58a5985bcae95b4da701ece
 --- /dev/null
 +++ b/ios/HandyAgentReplies.swift
-@@ -0,0 +1,369 @@
+@@ -0,0 +1,404 @@
 +import ActivityKit
 +import CryptoKit
 +import Foundation
@@ -425,6 +454,10 @@ index 0000000000000000000000000000000000000000..e684736363896351e7433fe54cf0da9c
 +    var processId: String?
 +    var status = "preparing"
 +    var excerpt = ""
++    // Optional fields decode old watches without discarding them. Full text
++    // stays in protected host storage; only one measured page reaches ActivityKit.
++    var responseText: String?
++    var responseTextComplete: Bool?
 +    var links: [String] = []
 +    var unread = false
 +    var notified = false
@@ -616,13 +649,18 @@ index 0000000000000000000000000000000000000000..e684736363896351e7433fe54cf0da9c
 +          watch = try read(id)
 +          watch.status = status
 +          let response = messages.last(where: { $0["role"] as? String == "assistant" && $0["execution_process_id"] as? String == process })?["content"] as? String
-+          if let response, terminal(status) || watch.excerpt.isEmpty {
++          // Conversation previews may be server-truncated summaries. Never
++          // replace normalized full text with that shorter fallback.
++          if let response, watch.responseText == nil || watch.responseText?.isEmpty == true {
 +            updateText(&watch, clean(response, profile))
 +          }
 +          if terminal(status) { watch.summaryAttempts += 1; socket?.cancel(); socket = nil }
 +          try save(watch)
 +          try? await publish()
-+          if terminal(status), response != nil || watch.summaryAttempts >= 5 { try await notify(id); return }
++          if terminal(status) {
++            await loadFullText(id)
++            if response != nil || watch.summaryAttempts >= 5 { try await notify(id); return }
++          }
 +        }
 +      } catch { /* Keep durable watch. Never surface raw server/transport/credential errors. */ }
 +      do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
@@ -630,7 +668,9 @@ index 0000000000000000000000000000000000000000..e684736363896351e7433fe54cf0da9c
 +  }
 +  private static func updateText(_ watch: inout Watch, _ text: String) {
 +    let next = String(text.prefix(3000))
-+    if watch.excerpt != next { watch.unread = true; watch.excerpt = next }
++    if watch.responseText != text { watch.unread = true }
++    watch.responseText = text
++    watch.excerpt = next
 +    let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 +    var links: [String] = []
 +    for match in detector?.matches(in: text, range: NSRange(text.startIndex..., in: text)) ?? [] {
@@ -642,7 +682,7 @@ index 0000000000000000000000000000000000000000..e684736363896351e7433fe54cf0da9c
 +    }
 +    watch.links = links
 +  }
-+  private static func stream(_ id: String, process: String) async {
++  private static func stream(_ id: String, process: String, replayOnly: Bool = false) async {
 +    do {
 +      let watch = try read(id)
 +      let (_, profile, session) = try connection(watch)
@@ -661,6 +701,15 @@ index 0000000000000000000000000000000000000000..e684736363896351e7433fe54cf0da9c
 +      socket.maximumMessageSize = 1_048_576
 +      socket.resume()
 +      defer { socket.cancel(with: .goingAway, reason: nil) }
++      var deadline: Task<Void, Never>?
++      if replayOnly {
++        // Opening a saved reply may replay finished logs, but never waits
++        // indefinitely or grants an unattended background runtime.
++        deadline = Task { @MainActor in
++          do { try await Task.sleep(nanoseconds: 12_000_000_000); socket.cancel(with: .goingAway, reason: nil) } catch { }
++        }
++      }
++      defer { deadline?.cancel() }
 +      var entries: [Int: String] = [:]
 +      var last = Date.distantPast
 +      var delayed: Task<Void, Never>?
@@ -673,7 +722,7 @@ index 0000000000000000000000000000000000000000..e684736363896351e7433fe54cf0da9c
 +          switch packet { case .data(let data): bytes = data; case .string(let text): bytes = Data(text.utf8); @unknown default: continue }
 +          guard let envelope = try JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { continue }
 +          if envelope["finished"] as? Bool == true {
-+            if let index = entries.keys.max(), let text = entries[index] { try await applyStreamText(id, process: process, text: text) }
++            if let index = entries.keys.max(), let text = entries[index] { try await applyStreamText(id, process: process, text: text, complete: true) }
 +            return
 +          }
 +          // Ready/finished/socket-close never establish an execution outcome.
@@ -684,7 +733,7 @@ index 0000000000000000000000000000000000000000..e684736363896351e7433fe54cf0da9c
 +            guard ["add", "replace"].contains(operation["op"] as? String ?? ""), let value = operation["value"] as? [String: Any],
 +                  value["type"] as? String == "NORMALIZED_ENTRY", let content = value["content"] as? [String: Any] else { continue }
 +            if (content["entry_type"] as? [String: Any])?["type"] as? String == "assistant_message", let text = content["content"] as? String {
-+              entries[index] = String(clean(text, profile).prefix(4096))
++              entries[index] = clean(text, profile)
 +            } else { entries.removeValue(forKey: index) }
 +          }
 +          // Bound retained assistant history, and coalesce ActivityKit writes.
@@ -705,12 +754,27 @@ index 0000000000000000000000000000000000000000..e684736363896351e7433fe54cf0da9c
 +      }, onCancel: { socket.cancel(with: .goingAway, reason: nil) })
 +    } catch { /* Polling/reconciliation remains authoritative after stream disconnect. */ }
 +  }
-+  private static func applyStreamText(_ id: String, process: String, text: String) async throws {
++  private static func applyStreamText(_ id: String, process: String, text: String, complete: Bool = false) async throws {
 +    try Task.checkCancellation()
 +    var current = try read(id)
-+    guard !terminal(current.status), current.processId == process, current.excerpt != String(text.prefix(3000)) else { return }
++    guard current.processId == process, complete || current.responseTextComplete != true,
++          current.responseText != text || (complete && current.responseTextComplete != true) else { return }
++    // A finished log replay verifies text completeness, not process completion.
++    // Execution outcome continues to come exclusively from the HTTP status API.
++    if complete { current.responseTextComplete = true }
 +    updateText(&current, text); try save(current)
 +    try? await publish()
++  }
++  static func loadFullText(_ id: String) async {
++    guard let watch = try? read(id), terminal(watch.status), watch.responseTextComplete != true,
++          let process = watch.processId else { return }
++    await stream(id, process: process, replayOnly: true)
++  }
++  static func textSnapshot(_ id: String) throws -> (pages: [String], revision: String, complete: Bool) {
++    let watch = try read(id)
++    let text = watch.responseText ?? watch.excerpt
++    let revision = SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
++    return (HandyReplyTextPages.pages(text), revision, watch.responseTextComplete == true)
 +  }
 +  static func snapshots() throws -> [[String: Any]] {
 +    try all().filter { $0.status != "preparing" }.map { watch in
@@ -1160,6 +1224,75 @@ index 0000000000000000000000000000000000000000..b672a0c4cf60367976f03e0ca7bcde44
 +    if FileManager.default.fileExists(atPath: file.path) {
 +      try FileManager.default.removeItem(at: file)
 +    }
++  }
++}
+diff --git a/ios/HandyReplyTextPages.swift b/ios/HandyReplyTextPages.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..18fe286d2e155a332915798784c7c5145ef0cb00
+--- /dev/null
++++ b/ios/HandyReplyTextPages.swift
+@@ -0,0 +1,63 @@
++import CoreText
++import Foundation
++
++// Shared by the host and native regression tests. The renderer uses this same
++// fixed width/font/three-line region, leaving room for paging and reply controls.
++enum HandyReplyTextPages {
++  static let width: Double = 240
++  static let fontSize: Double = 12
++  static let height: Double = 42
++  static let linesPerPage = 3
++  static let maxPageBytes = 768
++
++  static func pages(_ text: String) -> [String] {
++    guard !text.isEmpty else { return [""] }
++    let font = CTFontCreateUIFontForLanguage(.system, fontSize, nil)!
++    let attributed = NSAttributedString(string: text, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font])
++    let framesetter = CTFramesetterCreateWithAttributedString(attributed)
++    let path = CGPath(rect: CGRect(x: 0, y: 0, width: width, height: height), transform: nil)
++    let source = text as NSString
++    // CoreText offsets are UTF-16. Only cut at complete Swift Characters so
++    // combining accents, surrogate pairs and joined emoji survive page changes.
++    var boundaries: Set<Int> = [0]
++    var length = 0
++    for character in text {
++      length += String(character).utf16.count
++      boundaries.insert(length)
++    }
++    var result: [String] = []
++    var offset = 0
++    while offset < length {
++      let start = offset
++      let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: offset, length: 0), path, nil)
++      let visible = CTFrameGetVisibleStringRange(frame)
++      var end = min(length, visible.location + visible.length)
++      let lines = CTFrameGetLines(frame) as! [CTLine]
++      if let last = lines.prefix(linesPerPage).last {
++        let range = CTLineGetStringRange(last)
++        end = min(end, range.location + range.length)
++      }
++      while end > offset && !boundaries.contains(end) { end -= 1 }
++      if end <= offset {
++        end = offset + 1
++        while end < length && !boundaries.contains(end) { end += 1 }
++      }
++      offset = end
++      let candidate = source.substring(with: NSRange(location: start, length: offset - start))
++      var bytes = 0
++      var kept = 0
++      for character in candidate {
++        let value = String(character)
++        if bytes + value.utf8.count > maxPageBytes && kept > 0 { break }
++        bytes += value.utf8.count
++        kept += value.utf16.count
++      }
++      // Emoji/escaped content can consume much more payload than visual space.
++      // Keep the rest for the next page rather than invoking the activity's
++      // whole-page overflow fallback and making that text unreachable.
++      offset = start + kept
++      result.append(source.substring(with: NSRange(location: start, length: kept)))
++    }
++    return result
 +  }
 +}
 diff --git a/ios/HandyWorkspaceSearch.swift b/ios/HandyWorkspaceSearch.swift
