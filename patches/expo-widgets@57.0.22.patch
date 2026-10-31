@@ -839,10 +839,10 @@ index 0000000000000000000000000000000000000000..952a8404ed2ccfffc58a5985bcae95b4
 +}
 diff --git a/ios/HandyBackgroundDelivery.swift b/ios/HandyBackgroundDelivery.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..b592719e6e6dcac1047f7c6092b9c7fa7d2283fa
+index 0000000000000000000000000000000000000000..62a0658b9415bf2ff12001a18e5f807bfe7c7204
 --- /dev/null
 +++ b/ios/HandyBackgroundDelivery.swift
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,289 @@
 +import Foundation
 +import Security
 +import CryptoKit
@@ -912,6 +912,12 @@ index 0000000000000000000000000000000000000000..b592719e6e6dcac1047f7c6092b9c7fa
 +  @objc(handleResponse:notification:completion:)
 +  @available(iOSApplicationExtension, unavailable)
 +  static func handle(response: UNNotificationResponse, notification: [String: Any], completion: @escaping () -> Void) -> Bool {
++    if response.actionIdentifier == "handy-reminder-complete-v1",
++       let data = notification["data"] as? [String: Any], let id = data["reminderId"] as? String,
++       let revision = data["reminderRevision"] as? String {
++      Task { @MainActor in await HandyReminders.completeNotification(id: id, revision: revision, content: response.notification.request.content, completion: completion) }
++      return true
++    }
 +    if HandyWorkspaceSearch.handle(response: response, notification: notification, completion: completion) { return true }
 +    guard let data = notification["data"] as? [String: Any] else { return false }
 +    let press = response.actionIdentifier
@@ -1128,10 +1134,10 @@ index 0000000000000000000000000000000000000000..b592719e6e6dcac1047f7c6092b9c7fa
 +}
 diff --git a/ios/HandyHostServices.swift b/ios/HandyHostServices.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..23342049cefb36716ad671b4e3366b6aa0f469c2
+index 0000000000000000000000000000000000000000..c97f3c121f6a0298377f58478907ea5f4f9600b8
 --- /dev/null
 +++ b/ios/HandyHostServices.swift
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,53 @@
 +import Foundation
 +
 +// Expo's generated module registry also references WidgetsModule in extension
@@ -1167,6 +1173,8 @@ index 0000000000000000000000000000000000000000..23342049cefb36716ad671b4e3366b6a
 +        case "resume": HandyAgentReplies.resume(); completion("", nil)
 +        case "prepare-reply": try await HandyAgentReplies.prepareJSON(payload); completion("", nil)
 +        case "accept-reply": try await HandyAgentReplies.acceptJSON(payload); completion("", nil)
++        case "reminders-list", "reminders-create", "reminders-complete", "reminders-retry":
++          completion(try await HandyReminders.perform(String(operation.dropFirst("reminders-".count)), payload), nil)
 +        case "sync":
 +          guard #available(iOS 16.2, *), let value = try JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any], let configuration = value["configuration"] as? String else { throw Failure.invalid }
 +          completion(try await HandyActivityCoordinator.sync(configuration, renew: value["renew"] as? Bool == true), nil)
@@ -1176,7 +1184,9 @@ index 0000000000000000000000000000000000000000..23342049cefb36716ad671b4e3366b6a
 +        default: throw Failure.invalid
 +        }
 +      } catch let error as HandyActivityCoordinator.Failure { completion(nil, error.message) }
-+      catch { completion(nil, "Could not complete the host operation. Your saved draft/watch is retained; review before retrying.") }
++      catch let error as HandyReminders.Failure { completion(nil, error.message) }
++      catch let error as HandyReminderRecord.Failure { completion(nil, error.localizedDescription) }
++      catch { completion(nil, operation.hasPrefix("reminders-") ? "Could not update reminders. Your saved reminders are retained; retry from the list." : "Could not complete the host operation. Your saved draft/watch is retained; review before retrying.") }
 +    }
 +  }
 +  private enum Failure: Error { case invalid }
@@ -1224,6 +1234,207 @@ index 0000000000000000000000000000000000000000..b672a0c4cf60367976f03e0ca7bcde44
 +    if FileManager.default.fileExists(atPath: file.path) {
 +      try FileManager.default.removeItem(at: file)
 +    }
++  }
++}
+diff --git a/ios/HandyReminderRecord.swift b/ios/HandyReminderRecord.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..ae743df5e3ff4bfa0f8b3bc25afb913d006978d6
+--- /dev/null
++++ b/ios/HandyReminderRecord.swift
+@@ -0,0 +1,61 @@
++import Foundation
++
++// Foundation-only state machine, also compiled by the native regression tests.
++struct HandyReminderRecord: Codable, Equatable {
++  enum Status: String, Codable { case scheduling, active, completed }
++  struct Input: Codable {
++    let id: String
++    let text: String
++    let intervalMinutes: Int
++    let repeats: Bool
++  }
++  enum Failure: LocalizedError {
++    case invalid, text, interval, changed
++    var errorDescription: String? {
++      switch self {
++      case .invalid: return "This reminder could not be read. Open Reminders and try again."
++      case .text: return "Write a reminder using 1–2,000 characters."
++      case .interval: return "Choose a whole number of minutes between 1 minute and 365 days."
++      case .changed: return "This reminder changed. Refresh the reminder list before trying again."
++      }
++    }
++  }
++  let id: String
++  let revision: String
++  let text: String
++  let intervalMinutes: Int
++  let repeats: Bool
++  let createdAt: Double
++  var firstFireAt: Double?
++  var completedAt: Double?
++  var status: Status = .scheduling
++  var requestId: String { "handy-reminder-\(id)-\(revision)" }
++  var intervalSeconds: Double { Double(intervalMinutes) * 60 }
++
++  init(_ input: Input, now: Double, revision: String = UUID().uuidString) throws {
++    guard !input.id.isEmpty, input.id.count <= 100,
++          input.id.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) || $0 == "-" }) else { throw Failure.invalid }
++    let text = input.text.trimmingCharacters(in: .whitespacesAndNewlines)
++    guard !text.isEmpty, text.count <= 2000 else { throw Failure.text }
++    guard (1...525600).contains(input.intervalMinutes) else { throw Failure.interval }
++    id = input.id; self.revision = revision; self.text = text
++    intervalMinutes = input.intervalMinutes; repeats = input.repeats; createdAt = now
++  }
++  func matches(_ input: Input) -> Bool {
++    id == input.id && text == input.text.trimmingCharacters(in: .whitespacesAndNewlines) && intervalMinutes == input.intervalMinutes && repeats == input.repeats
++  }
++  mutating func preparing(at now: Double) throws {
++    guard status != .completed else { throw Failure.changed }
++    firstFireAt = now + intervalSeconds * 1000
++    status = .scheduling
++  }
++  mutating func activate() throws {
++    guard status != .completed, firstFireAt != nil else { throw Failure.changed }
++    status = .active
++  }
++  mutating func complete(revision expected: String, at now: Double) throws {
++    guard expected == revision else { throw Failure.changed }
++    guard status != .completed else { return }
++    status = .completed; completedAt = now
++  }
++}
+diff --git a/ios/HandyReminders.swift b/ios/HandyReminders.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..728cd2eca13eb8199547b8657bf437e1775d076b
+--- /dev/null
++++ b/ios/HandyReminders.swift
+@@ -0,0 +1,128 @@
++import Foundation
++import UserNotifications
++
++// A repeating UNTimeInterval trigger is owned by iOS, not a JS timer or a finite
++// batch of future requests. Completion runs before Notifee/React event delivery.
++@MainActor
++@available(iOSApplicationExtension, unavailable)
++enum HandyReminders {
++  static let category = "handy-reminder-v1"
++  static let completePress = "handy-reminder-complete-v1"
++  struct Failure: LocalizedError {
++    let message: String
++    var errorDescription: String? { message }
++  }
++  private static var tail: Task<Void, Never>?
++  private static func transaction<T>(_ operation: @escaping @MainActor () async throws -> T) async throws -> T {
++    let previous = tail
++    let task = Task<T, Error> { @MainActor in await previous?.value; return try await operation() }
++    tail = Task { @MainActor in _ = try? await task.value }
++    return try await task.value
++  }
++  private static func file() throws -> URL {
++    let folder = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("HandyReminders-v1", isDirectory: true)
++    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
++    return folder.appendingPathComponent("reminders.json")
++  }
++  private static func read() throws -> [HandyReminderRecord] {
++    let url = try file()
++    guard FileManager.default.fileExists(atPath: url.path) else { return [] }
++    return try JSONDecoder().decode([HandyReminderRecord].self, from: Data(contentsOf: url))
++  }
++  private static func save(_ records: [HandyReminderRecord]) throws {
++    try JSONEncoder().encode(records).write(to: file(), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
++  }
++  private static func cancel(_ record: HandyReminderRecord) {
++    let ids = [record.requestId, record.requestId + "-error"]
++    UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
++    UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
++  }
++  private static func registerCategory() async {
++    let center = UNUserNotificationCenter.current()
++    var categories = await center.notificationCategories()
++    categories = Set(categories.filter { $0.identifier != category })
++    let action = UNNotificationAction(identifier: completePress, title: "Mark complete", options: [])
++    categories.insert(UNNotificationCategory(identifier: category, actions: [action], intentIdentifiers: [], options: []))
++    center.setNotificationCategories(categories)
++  }
++  private static func schedule(_ index: Int, _ records: inout [HandyReminderRecord]) async throws {
++    guard records[index].status == .scheduling else { return }
++    let center = UNUserNotificationCenter.current()
++    let settings = await center.notificationSettings()
++    guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
++      throw Failure(message: "Allow notifications in iOS Settings, then retry this reminder.")
++    }
++    let pending = await center.pendingNotificationRequests()
++    // After a crash between OS acceptance and local activation, keep the same
++    // request and cadence rather than postponing the first reminder on retry.
++    if !pending.contains(where: { $0.identifier == records[index].requestId }) {
++      guard pending.count < 60 else { throw Failure(message: "The scheduled-notification limit is nearly full. Complete a reminder before adding another.") }
++      try records[index].preparing(at: Date().timeIntervalSince1970 * 1000)
++      try save(records)
++      let record = records[index]
++      await registerCategory()
++      let content = UNMutableNotificationContent()
++      content.title = "Reminder"
++      content.body = record.text
++      content.sound = .default
++      content.categoryIdentifier = category
++      let data = ["reminderId": record.id, "reminderRevision": record.revision]
++      let notification: [String: Any] = ["id": record.requestId, "title": content.title, "body": record.text, "data": data,
++        "ios": ["categoryId": category, "foregroundPresentationOptions": ["banner": true, "list": true, "sound": true, "badge": false]]]
++      content.userInfo = ["__notifee_notification": notification]
++      let trigger = UNTimeIntervalNotificationTrigger(timeInterval: record.intervalSeconds, repeats: record.repeats)
++      try await center.add(UNNotificationRequest(identifier: record.requestId, content: content, trigger: trigger))
++    }
++    try records[index].activate()
++    try save(records)
++  }
++  static func perform(_ operation: String, _ json: String) async throws -> String {
++    try await transaction {
++      var records = try read()
++      // Completion is durable before cancellation. Repair a killed process's
++      // cancellation on any subsequent operation; never reschedule completed data.
++      for record in records where record.status == .completed { cancel(record) }
++      switch operation {
++      case "list": break
++      case "create":
++        let input = try JSONDecoder().decode(HandyReminderRecord.Input.self, from: Data(json.utf8))
++        let validated = try HandyReminderRecord(input, now: Date().timeIntervalSince1970 * 1000)
++        let index: Int
++        if let existing = records.firstIndex(where: { $0.id == input.id }) {
++          guard records[existing].matches(input), records[existing].status != .completed else { throw HandyReminderRecord.Failure.changed }
++          index = existing
++        } else {
++          records.insert(validated, at: 0); index = 0
++          try save(records)
++        }
++        try await schedule(index, &records)
++      case "complete", "retry":
++        guard let value = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: String],
++              let id = value["id"], let revision = value["revision"],
++              let index = records.firstIndex(where: { $0.id == id }), records[index].revision == revision else { throw HandyReminderRecord.Failure.changed }
++        if operation == "complete" {
++          try records[index].complete(revision: revision, at: Date().timeIntervalSince1970 * 1000)
++          try save(records)
++          cancel(records[index])
++        } else { try await schedule(index, &records) }
++      default: throw HandyReminderRecord.Failure.invalid
++      }
++      return String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
++    }
++  }
++  static func completeNotification(id: String, revision: String, content: UNNotificationContent, completion: @escaping () -> Void) async {
++    do {
++      let json = String(decoding: try JSONSerialization.data(withJSONObject: ["id": id, "revision": revision]), as: UTF8.self)
++      _ = try await perform("complete", json)
++    } catch {
++      // Failure must not claim success or stop a reminder without a durable
++      // completion. Keep a separate actionable error; do not replace its trigger.
++      let feedback = content.mutableCopy() as! UNMutableNotificationContent
++      feedback.title = "Reminder not completed"
++      feedback.body = "Try Mark complete again, or open Reminders in Handy Actions."
++      feedback.sound = nil
++      try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "handy-reminder-\(id)-\(revision)-error", content: feedback, trigger: nil))
++    }
++    completion()
 +  }
 +}
 diff --git a/ios/HandyReplyTextPages.swift b/ios/HandyReplyTextPages.swift
@@ -1853,14 +2064,17 @@ index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..a99bb834446a904b1e64e003816adadd
    }
  }
 diff --git a/ios/WidgetsModule.swift b/ios/WidgetsModule.swift
-index b1b4295e22726e6fe501aa5e514b56061dea57a1..2bc3dfba8565a49fd77224366da568fef5673aab 100644
+index b1b4295e22726e6fe501aa5e514b56061dea57a1..6520e691bd8f385555dda6723e06d108be5c246a 100644
 --- a/ios/WidgetsModule.swift
 +++ b/ios/WidgetsModule.swift
-@@ -17,6 +17,47 @@ public final class WidgetsModule: Module {
+@@ -17,6 +17,50 @@ public final class WidgetsModule: Module {
  
      Events(onPushToStartTokenReceived, onTokenReceived, onUserInteraction)
  
 +    OnCreate { Task { _ = try? await HandyHostServiceBridge.call("resume") } }
++    AsyncFunction("handyReminders") { (operation: String, payload: String) async throws -> String in
++      try await HandyHostServiceBridge.call("reminders-" + operation, payload)
++    }
 +    AsyncFunction("prepareHandyReplyWatch") { (text: String) async throws in
 +      _ = try await HandyHostServiceBridge.call("prepare-reply", text)
 +    }

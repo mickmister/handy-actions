@@ -79,6 +79,7 @@ export default function NotesScreen() {
       <Text style={styles.title}>Notes inbox</Text>
       <View style={{flexDirection:'row',gap:12}}>{(['unaddressed','completed'] as const).map(status=><Choice key={status} label={`${status==='unaddressed'?'Unaddressed':'Completed'} (${notes.filter(note=>(note.status??'unaddressed')===status).length})`} selected={view===status} disabled={busy} onPress={()=>{setView(status);setEditing(undefined);setChoosingAgent(false);setSelecting(false);setSelected([]);}} />)}</View>
       <Link style={styles.link} href="/pending-notes">Recover unsent notes</Link>
+      <Link style={styles.link} href="/reminders">Reminders</Link>
       {view === 'unaddressed' ? <>
         <Choice label={selecting ? 'Cancel selection' : 'Select notes to combine'} disabled={busy} onPress={() => {setSelecting(!selecting);setSelected([]);setEditing(undefined);}} />
         {selecting ? <Choice label={`Combine ${selected.length} notes →`} disabled={busy || selected.length < 2} onPress={() => {

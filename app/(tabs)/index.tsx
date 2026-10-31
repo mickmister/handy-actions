@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'expo-router';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { GlassPanel } from '@/components/GlassPanel';
@@ -42,6 +43,8 @@ export default function PresetsScreen() {
           <Text style={styles.primaryButtonText}>Refresh lock screen</Text>
         </Pressable>
       </GlassPanel>
+
+      <Link href="/reminders" asChild><Pressable style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Reminders</Text></Pressable></Link>
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>New preset</Text>

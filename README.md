@@ -79,6 +79,32 @@ text/paging to ActivityKit's payload limit.
 long-message and streaming-boundary tests on macOS. The same test is required by
 the iOS EAS post-install hook before building the signed app.
 
+### Reminders (iOS)
+
+Open **Reminders** from the home screen or Notes. Write a reminder and choose a
+custom interval in minutes, hours or days. The default is **in one hour, then every
+hour until completed**. **Notify once** uses the same delay without repeating.
+The first delay and repeat interval are the same. A single repeating iOS local
+notification continues while the app is closed, without JS timers, background
+polling, a push service or a finite queue of future hourly notifications.
+
+Expand a notification and choose **Mark complete**, or complete it in the app.
+The native handler persists completion and cancels the pending repeating request
+and displayed reminder before React event delivery; completed history remains in
+the app. Swiping away a notification or opening its body does not complete it.
+Notification body taps open the Reminders screen. Reminder categories survive
+preset refreshes, and preset cleanup does not remove reminder requests.
+
+Protected `HandyReminders-v1` storage retains scheduling/active/completed records,
+stable notification identities and revision-bound completion. Interrupted setup
+stays visible with **Retry scheduling**; retry preserves an already accepted OS
+request rather than postponing its first alert. Completed records never rearm.
+The app reports denied permission or scheduling-limit failures instead of claiming
+the reminder is scheduled. `pnpm test:native` includes reminder lifecycle tests;
+the same tests run before every iOS EAS build.
+
+### Agent reply tracking
+
 Host-only protected `HandyAgentReplies-v1` records retain immediate-send process
 IDs and exact destination snapshots. The host reads normalized-log WebSockets for
 assistant text and separately verifies process status; Ready, stream closure and

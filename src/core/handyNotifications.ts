@@ -42,6 +42,8 @@ import { isRefreshPress, REFRESH_NOTIFICATION_ID, REFRESH_PRESS_ID } from './loc
 import { notificationEditorContext } from './notificationEditorContext';
 import { beginWorkspaceSearch, workspaceSearchAvailable } from './workspaceSearch';
 import { workspaceNotificationBrowserUrl } from './workspaceNotificationBrowser';
+import { REMINDER_CATEGORY, REMINDER_COMPLETE_PRESS, reminderPress } from './reminderModel';
+import { completeReminder } from './reminders';
 
 const CHANNEL_ID = 'handy-actions';
 const INPUT_CATEGORY = 'handy-text-input';
@@ -65,6 +67,7 @@ export type NotificationPressTarget =
   | { type: 'input'; submissionId: string; submit?: boolean }
   | { type: 'editor'; draftId: string }
   | { type: 'refresh'; token: string }
+  | { type: 'reminders'; id: string }
   | { type: 'preset'; presetId: string };
 
 export type NotificationStatus = {
@@ -123,6 +126,7 @@ export function syncPresetNotifications(state: HandyState, options: { renewActiv
 async function configureCategories(state: HandyState): Promise<void> {
   if (Platform.OS !== 'ios') return;
   await notifee.setNotificationCategories([
+    {id:REMINDER_CATEGORY,actions:[{id:REMINDER_COMPLETE_PRESS,title:'Mark complete',foreground:false}]},
     {id:'handy-refresh-lock-screen-v1',actions:[{id:REFRESH_PRESS_ID,title:'Refresh Lock Screen',foreground:true}]},
     {id:'handy-action-editor-v1',actions:[]},
     ...(nativeActionInbox ? [{id:'handy-agent-reply-v1',actions:[{id:INPUT_PRESS,title:'Reply',foreground:false,input:{placeholderText:'Reply to this session',buttonText:'Send'}}]}] : []),
@@ -262,6 +266,12 @@ export async function handleNotificationEvent(event: Event): Promise<void> {
 }
 
 async function openPressAction(pressId: unknown, data: unknown, input?: string, notificationId?: string): Promise<void> {
+  const reminder = reminderPress(pressId, data, input);
+  if (reminder) {
+    if (reminder.complete) await completeReminder(reminder.id, reminder.revision);
+    else deliverPressTarget({type:'reminders',id:reminder.id});
+    return;
+  }
   const browserUrl = workspaceNotificationBrowserUrl(pressId, data, input);
   if (browserUrl) { await Linking.openURL(browserUrl); return; }
   if (isRefreshPress(pressId, data, notificationId)) {

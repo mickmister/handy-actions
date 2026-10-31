@@ -69,6 +69,7 @@ function RootLayoutNav() {
 
   useEffect(() => {
     setNotificationPressHandler((target) => {
+      if (target.type === 'reminders') { router.push('/reminders'); return; }
       if(target.type==='refresh') {
         const key=`refresh:${target.token}`;
         if(routedSubmissions.current.has(key))return;
