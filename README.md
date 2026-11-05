@@ -2,6 +2,25 @@
 
 Local presets with QR, web, deep-link, text-input, HTTP and VD agent actions for iOS and Android.
 
+## Saved presets and settings
+
+Presets, action order, theme and surface/workspace preferences are saved together.
+`handy-actions/state-recovery/v1` holds a validated commit snapshot before the
+backward-compatible `handy-actions/state/v1` mirror is updated. A missing or
+damaged primary can load from the recovery snapshot; legacy data is migrated
+without changing IDs, payloads or order. Interrupted mirror writes cannot roll
+back the committed snapshot, and serialized functional edits preserve concurrent
+changes to other settings.
+
+A failed/unreadable cold-start load is shown as an error, not a reset. Editing and
+surface rebuilds wait for a successful load. The last confirmed in-memory state
+is retained, foregrounding retries an unsuccessful load, and **Retry loading saved
+settings** is available on the home screen and in Settings. Present-but-invalid
+data is never normalized into empty defaults. Recovery requires at least one
+valid saved copy; previously overwritten data cannot be reconstructed from a
+missing record. Regression tests cover cold starts, read/write failures, recovery,
+legacy compatibility and concurrent edits in `test/handyStatePersistence.test.ts`.
+
 ## Lock-screen comparison
 
 In **Settings → Lock-screen experiments**, independently enable **Live Activities**, **Lock Screen Widgets**, and **Preset notification panels**. Live Activities and widgets can be enabled together. Live Activities are on by default; widgets are opt-in. Native text-input notifications are available even when preset notification panels are off.

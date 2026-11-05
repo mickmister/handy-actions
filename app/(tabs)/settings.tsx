@@ -76,6 +76,7 @@ export default function SettingsScreen() {
   }
 
   async function refreshNotifications() {
+    if (!handy.refreshReady) return;
     const message = await syncPresetNotifications(handy.state);
     handy.setMessage(message);
   }
@@ -92,6 +93,7 @@ export default function SettingsScreen() {
         <Text style={styles.cardTitle}>About</Text>
         <Text selectable style={styles.copy}>Commit: {process.env.EXPO_PUBLIC_COMMIT_HASH || 'Unknown'}</Text>
         <Text selectable style={styles.copy}>{process.env.EXPO_PUBLIC_COMMIT_MESSAGE || 'Commit message unavailable'}</Text>
+        {handy.storageError ? <><Text accessibilityLiveRegion="polite" style={styles.copy}>{handy.storageError}</Text><Pressable style={styles.secondaryButton} disabled={handy.loading} onPress={() => void handy.retryLoad()}><Text style={styles.secondaryButtonText}>{handy.loading ? 'Loading saved settings…' : 'Retry loading saved settings'}</Text></Pressable></> : null}
       </View>
 
       <View style={styles.card}>
@@ -189,7 +191,7 @@ export default function SettingsScreen() {
             <Text style={styles.primaryButtonText}>Request access</Text>
           </Pressable>
         </View>
-        <Pressable style={styles.darkButton} onPress={refreshNotifications}>
+        <Pressable style={styles.darkButton} disabled={!handy.refreshReady} onPress={refreshNotifications}>
           <Text style={styles.darkButtonText}>Rebuild lock-screen surfaces</Text>
         </Pressable>
       </View>

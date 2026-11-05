@@ -372,7 +372,8 @@ async function syncStoredPresetNotifications(): Promise<void> {
   try {
     await syncPresetNotifications(await loadHandyState());
   } catch {
-    await syncPresetNotifications(currentState);
+    // A cold-start storage failure must not replace existing surfaces with an
+    // empty process-local fallback. Retry from persisted state when available.
   }
 }
 

@@ -22,6 +22,7 @@ export default function PresetsScreen() {
   }
 
   async function refreshNotifications() {
+    if (!handy.refreshReady) return;
     const message = await syncPresetNotifications(handy.state);
     handy.setMessage(message);
   }
@@ -39,7 +40,8 @@ export default function PresetsScreen() {
       <GlassPanel style={styles.statusCard} fallbackStyle={styles.statusCardFallback}>
         <Text style={styles.statusTitle}>{enabledCount} enabled</Text>
         <Text style={styles.statusCopy}>{handy.message}</Text>
-        <Pressable style={styles.primaryButton} onPress={refreshNotifications}>
+        {handy.storageError ? <Pressable style={styles.secondaryButton} disabled={handy.loading} onPress={() => void handy.retryLoad()}><Text style={styles.secondaryButtonText}>{handy.loading ? 'Loading saved settings…' : 'Retry loading saved settings'}</Text></Pressable> : null}
+        <Pressable style={styles.primaryButton} disabled={!handy.refreshReady} onPress={refreshNotifications}>
           <Text style={styles.primaryButtonText}>Refresh lock screen</Text>
         </Pressable>
       </GlassPanel>
@@ -57,7 +59,7 @@ export default function PresetsScreen() {
           keyboardAppearance={dark ? 'dark' : 'light'}
           style={styles.input}
         />
-        <Pressable style={styles.secondaryButton} onPress={addPreset}>
+        <Pressable style={styles.secondaryButton} disabled={!handy.loaded} onPress={addPreset}>
           <Text style={styles.secondaryButtonText}>Add preset</Text>
         </Pressable>
       </View>
