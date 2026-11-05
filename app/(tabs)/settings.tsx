@@ -108,8 +108,10 @@ export default function SettingsScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Saved settings status</Text>
-        <Text style={styles.copy}>Last load result, record counts and theme. No preset content or credentials are shown.</Text>
+        <Text style={styles.copy}>Last preset load result and record counts. Legacy theme fields describe older snapshots.</Text>
+        <Text style={styles.copy}>Separate theme preference: {handy.themeLoaded ? handy.state.theme : 'Unavailable'}</Text>
         <Text selectable style={styles.codeBlock}>{JSON.stringify(handyStateRepository.getDiagnostics(), null, 2)}</Text>
+        <Link href="/recover-presets" style={styles.link}>Look for previous presets</Link>
         <Pressable style={styles.secondaryButton} disabled={handy.loading} onPress={() => void handy.retryLoad()}><Text style={styles.secondaryButtonText}>{handy.loading ? 'Loading…' : 'Reload saved settings'}</Text></Pressable>
       </View>
 
@@ -174,14 +176,15 @@ export default function SettingsScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>App & Live Activity theme</Text>
-        {themeOptions.map(theme=><Pressable key={theme.id} accessibilityRole="button" accessibilityState={{ selected: (handy.state.theme??'psychedelic')===theme.id, disabled: !handy.loaded||syncing }} disabled={!handy.loaded||syncing} style={[styles.card,{backgroundColor:theme.colors[0],borderColor:(handy.state.theme??'psychedelic')===theme.id?colors.primary:'transparent',borderWidth:3}]} onPress={()=>{
+        {handy.themeError ? <><Text accessibilityLiveRegion="polite" style={styles.copy}>{handy.themeError}</Text><Pressable style={styles.secondaryButton} disabled={syncing} onPress={() => void handy.retryTheme()}><Text style={styles.secondaryButtonText}>Retry theme preference</Text></Pressable></> : null}
+        {themeOptions.map(theme=><Pressable key={theme.id} accessibilityRole="button" accessibilityState={{ selected: (handy.state.theme??'psychedelic')===theme.id, disabled: syncing }} disabled={syncing} style={[styles.card,{backgroundColor:theme.colors[0],borderColor:(handy.state.theme??'psychedelic')===theme.id?colors.primary:'transparent',borderWidth:3}]} onPress={()=>{
           setSyncing(true);
           void handy.updateTheme(theme.id).then(result=>{if(!result.ok)throw new Error(result.message);}).catch(()=>Alert.alert('Theme','Could not apply the theme.')).finally(()=>setSyncing(false));
         }}><Text style={{color:appTheme(theme.id).colors.text,fontWeight:'800'}}>{theme.name}{(handy.state.theme??'psychedelic')===theme.id?' ✓':''}</Text>
           <View style={styles.buttonRow}>{theme.colors.map(color=><View key={color} style={{backgroundColor:color,width:36,height:20,borderRadius:6,borderWidth:1,borderColor:appTheme(theme.id).colors.border}} />)}</View>
           <Text style={{color:appTheme(theme.id).colors.muted}}>{theme.description}</Text>
         </Pressable>)}
-        <Text style={styles.copy}>Applies throughout the app and to Live Activities, and is saved on this device. Live Activity colors change on app-requested updates; Always-On uses a subdued palette.</Text>
+        <Text style={styles.copy}>Saved separately in the theme preference vault. Theme changes never rewrite presets or actions. Live Activity colors change on app-requested updates; Always-On uses a subdued palette.</Text>
       </View>
 
       <View style={styles.card}>

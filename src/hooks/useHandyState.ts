@@ -6,16 +6,17 @@ import { handyStateRepository } from '@/src/core/handyStore';
 import { createHandyStateSession } from '@/src/core/handyStateSession';
 import { type StateMutation } from '@/src/core/handyStateRepository';
 import { movePresetAction } from '@/src/core/actionOrdering';
+import { themePreferences } from '@/src/core/themePreferences';
 
 export type { SaveResult } from '@/src/core/handyStateSession';
 
 export function useHandyState() {
-  const [session] = useState(() => createHandyStateSession(handyStateRepository));
+  const [session] = useState(() => createHandyStateSession(handyStateRepository, themePreferences));
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   useEffect(() => {
     void session.load();
     const subscription = AppState.addEventListener('change', state => {
-      if (state === 'active' && !session.getSnapshot().loaded) void session.load();
+      if (state === 'active' && (!session.getSnapshot().loaded || !session.getSnapshot().themeLoaded)) void session.load();
     });
     return () => subscription.remove();
   }, [session]);
@@ -32,16 +33,24 @@ export function useHandyState() {
       {id: makeId('action'), name: name.trim() || 'Untitled action', payload}]} : preset)}), 'Action added.'), [persist]);
   const deleteAction = useCallback((presetId: string, actionId: string) => persist(state => ({...state,
     presets: state.presets.map(preset => preset.id === presetId ? {...preset, actions: preset.actions.filter(action => action.id !== actionId)} : preset)}), 'Action deleted.'), [persist]);
-  const importText = useCallback((text: string) => persist(() => importHandyState(text), 'Imported presets.'), [persist]);
+  const importText = useCallback(async (text: string) => {
+    const state = importHandyState(text);
+    const result = await persist(() => state, 'Imported presets.');
+    if (!result.ok || !state.theme) return result;
+    const preference = await session.updateTheme(state.theme, 'Imported presets and theme.');
+    return preference.ok ? preference : {ok: false as const, message: `Presets imported. ${preference.message}`};
+  }, [persist, session]);
 
   return {
     ...snapshot,
     setMessage: session.setMessage,
     retryLoad: session.load,
+    retryTheme: session.retryTheme,
+    restorePresets: session.restorePresets,
     addPreset, togglePreset, deletePreset, addAction, deleteAction, importText,
     exportText: exportHandyState(snapshot.state),
     updateSurfaces: (surfaces: SurfaceSettings) => persist(state => ({...state, surfaces}), 'Lock-screen settings saved.'),
-    updateTheme: (theme: NonNullable<HandyState['theme']>) => persist(state => ({...state, theme}), 'Theme saved.'),
+    updateTheme: session.updateTheme,
     updateRecentWorkspaces: (recentWorkspaces: NonNullable<HandyState['recentWorkspaces']>) =>
       persist(state => ({...state, recentWorkspaces}), 'Recent VD workspaces settings saved.'),
     updateAction: (presetId: string, actionId: string, name: string, payload: HandyActionPayload) => persist(state => ({...state,

@@ -14,6 +14,7 @@ try {
   for (const [source, tests] of [
     ['HandyReplyTextPages.swift', 'ReplyTextPagesTests.swift'],
     ['HandyReminderRecord.swift', 'ReminderRecordTests.swift'],
+    ['HandySettingsRecovery.swift', 'SettingsRecoveryTests.swift'],
   ]) {
     for (const [command, args] of [
       ['xcrun', ['--sdk', 'macosx', 'swiftc', `node_modules/expo-widgets/ios/${source}`, `test/native/${tests}`, '-o', binary]],

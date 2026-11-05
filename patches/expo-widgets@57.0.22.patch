@@ -1134,10 +1134,10 @@ index 0000000000000000000000000000000000000000..62a0658b9415bf2ff12001a18e5f807b
 +}
 diff --git a/ios/HandyHostServices.swift b/ios/HandyHostServices.swift
 new file mode 100644
-index 0000000000000000000000000000000000000000..c97f3c121f6a0298377f58478907ea5f4f9600b8
+index 0000000000000000000000000000000000000000..0d13a5ff1c55d85b7e377e429c8a7901750298f5
 --- /dev/null
 +++ b/ios/HandyHostServices.swift
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,54 @@
 +import Foundation
 +
 +// Expo's generated module registry also references WidgetsModule in extension
@@ -1173,6 +1173,7 @@ index 0000000000000000000000000000000000000000..c97f3c121f6a0298377f58478907ea5f
 +        case "resume": HandyAgentReplies.resume(); completion("", nil)
 +        case "prepare-reply": try await HandyAgentReplies.prepareJSON(payload); completion("", nil)
 +        case "accept-reply": try await HandyAgentReplies.acceptJSON(payload); completion("", nil)
++        case "settings-candidates": completion(try HandySettingsRecovery.scanApp(), nil)
 +        case "reminders-list", "reminders-create", "reminders-complete", "reminders-retry":
 +          completion(try await HandyReminders.perform(String(operation.dropFirst("reminders-".count)), payload), nil)
 +        case "sync":
@@ -1186,7 +1187,7 @@ index 0000000000000000000000000000000000000000..c97f3c121f6a0298377f58478907ea5f
 +      } catch let error as HandyActivityCoordinator.Failure { completion(nil, error.message) }
 +      catch let error as HandyReminders.Failure { completion(nil, error.message) }
 +      catch let error as HandyReminderRecord.Failure { completion(nil, error.localizedDescription) }
-+      catch { completion(nil, operation.hasPrefix("reminders-") ? "Could not update reminders. Your saved reminders are retained; retry from the list." : "Could not complete the host operation. Your saved draft/watch is retained; review before retrying.") }
++      catch { completion(nil, operation == "settings-candidates" ? "Could not inspect previous settings files. Unlock the phone and retry." : operation.hasPrefix("reminders-") ? "Could not update reminders. Your saved reminders are retained; retry from the list." : "Could not complete the host operation. Your saved draft/watch is retained; review before retrying.") }
 +    }
 +  }
 +  private enum Failure: Error { case invalid }
@@ -1505,6 +1506,48 @@ index 0000000000000000000000000000000000000000..18fe286d2e155a332915798784c7c514
 +    }
 +    return result
 +  }
++}
+diff --git a/ios/HandySettingsRecovery.swift b/ios/HandySettingsRecovery.swift
+new file mode 100644
+index 0000000000000000000000000000000000000000..92c3f6b62a2b737f6ea5f6264d39e84b63265fbb
+--- /dev/null
++++ b/ios/HandySettingsRecovery.swift
+@@ -0,0 +1,36 @@
++import CryptoKit
++import Foundation
++
++// Read-only access to the two known legacy settings value files. An old theme
++// save may have created a valid inline empty state while leaving the former
++// large value file behind. Scanning must not silently replace intentional data.
++enum HandySettingsRecovery {
++  static func scanApp() throws -> String {
++    guard let bundle = Bundle.main.bundleIdentifier else { throw Failure.container }
++    let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
++    return try scan(directory: support.appendingPathComponent(bundle, isDirectory: true).appendingPathComponent("RCTAsyncLocalStorage_V1", isDirectory: true))
++  }
++  static func scan(directory: URL) throws -> String {
++    let keys = [("handy-actions/state/v1", "Previous preset settings file"), ("handy-actions/state-recovery/v1", "Previous recovery file")]
++    var files: [[String: Any]] = []
++    var unreadable = 0
++    for (key, source) in keys {
++      let name = Insecure.MD5.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
++      let url = directory.appendingPathComponent(name)
++      do {
++        let bytes = try Data(contentsOf: url)
++        guard let raw = String(data: bytes, encoding: .utf8) else { unreadable += 1; continue }
++        let id = SHA256.hash(data: Data(key.utf8) + bytes).map { String(format: "%02x", $0) }.joined()
++        var file: [String: Any] = ["id": id, "source": source, "raw": raw]
++        if let date = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date { file["modifiedAt"] = date.timeIntervalSince1970 * 1000 }
++        files.append(file)
++      } catch {
++        let error = error as NSError
++        let missing = error.domain == NSCocoaErrorDomain && (error.code == CocoaError.fileReadNoSuchFile.rawValue || error.code == CocoaError.fileNoSuchFile.rawValue)
++        if !missing { unreadable += 1 }
++      }
++    }
++    return String(decoding: try JSONSerialization.data(withJSONObject: ["files": files, "unreadableFiles": unreadable]), as: UTF8.self)
++  }
++  private enum Failure: Error { case container }
 +}
 diff --git a/ios/HandyWorkspaceSearch.swift b/ios/HandyWorkspaceSearch.swift
 new file mode 100644
@@ -2064,14 +2107,17 @@ index 55fb9b3d5fa04d38ab8c2a8b3de7f7656afc401e..a99bb834446a904b1e64e003816adadd
    }
  }
 diff --git a/ios/WidgetsModule.swift b/ios/WidgetsModule.swift
-index b1b4295e22726e6fe501aa5e514b56061dea57a1..6520e691bd8f385555dda6723e06d108be5c246a 100644
+index b1b4295e22726e6fe501aa5e514b56061dea57a1..bfeee1cdc19f9ca971461ae5bf685d038b0bcbb4 100644
 --- a/ios/WidgetsModule.swift
 +++ b/ios/WidgetsModule.swift
-@@ -17,6 +17,50 @@ public final class WidgetsModule: Module {
+@@ -17,6 +17,53 @@ public final class WidgetsModule: Module {
  
      Events(onPushToStartTokenReceived, onTokenReceived, onUserInteraction)
  
 +    OnCreate { Task { _ = try? await HandyHostServiceBridge.call("resume") } }
++    AsyncFunction("readHandySettingsRecovery") { () async throws -> String in
++      try await HandyHostServiceBridge.call("settings-candidates")
++    }
 +    AsyncFunction("handyReminders") { (operation: String, payload: String) async throws -> String in
 +      try await HandyHostServiceBridge.call("reminders-" + operation, payload)
 +    }

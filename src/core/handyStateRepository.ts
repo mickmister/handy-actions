@@ -1,11 +1,14 @@
-import { defaultHandyState, importHandyState, validateHandyState, type HandyState } from './handyModel.ts';
+import { defaultHandyState, importHandyState, makeId, validateHandyState, type HandyState } from './handyModel.ts';
+import { mergeRecoveredPresets, withoutTheme } from './presetRecovery.ts';
 
 export const HANDY_STATE_KEY = 'handy-actions/state/v1';
 export const HANDY_STATE_RECOVERY_KEY = 'handy-actions/state-recovery/v1';
+export const HANDY_STATE_BEFORE_RESTORE = 'handy-actions/state-before-restore/';
+export const LEGACY_THEME_SEED_KEY = 'handy-actions/legacy-theme-seed/v1';
 type Storage = { getItem(key: string): Promise<string | null>; setItem(key: string, value: string): Promise<void> };
 type Journal = { version: 1; state: HandyState; legacyBase: string | null };
 export type StateMutation = (current: HandyState) => HandyState;
-type RecordDiagnostic = {status: 'missing' | 'valid' | 'invalid'; presets?: number; actions?: number; theme?: string};
+type RecordDiagnostic = {status: 'missing' | 'valid' | 'invalid'; presets?: number; actions?: number; legacyTheme?: string};
 export type HandyStateDiagnostics = {
   checkedAt?: string;
   primary?: RecordDiagnostic;
@@ -13,7 +16,7 @@ export type HandyStateDiagnostics = {
   source?: 'primary' | 'recovery' | 'new-empty' | 'read-error';
 };
 function diagnostic(raw: string | null, state: HandyState | undefined): RecordDiagnostic {
-  return state ? {status: 'valid', presets: state.presets.length, actions: state.presets.reduce((total, preset) => total + preset.actions.length, 0), theme: state.theme ?? 'psychedelic'} : {status: raw === null ? 'missing' : 'invalid'};
+  return state ? {status: 'valid', presets: state.presets.length, actions: state.presets.reduce((total, preset) => total + preset.actions.length, 0), ...(state.theme ? {legacyTheme: state.theme} : {})} : {status: raw === null ? 'missing' : 'invalid'};
 }
 
 export class HandyStateStorageError extends Error {
@@ -121,5 +124,58 @@ export function createHandyStateRepository(storage: Storage) {
         return state;
       });
     },
+    // Only an explicit user-selected recovery invokes this operation. Preserve
+    // raw current records before replacing even an unreadable current snapshot.
+    restorePresets(recovered: HandyState): Promise<HandyState> {
+      return serial(async () => {
+        const candidate = decode(withoutTheme(recovered));
+        let primary: string | null;
+        let recovery: string | null;
+        try { [primary, recovery] = await Promise.all([storage.getItem(HANDY_STATE_KEY), storage.getItem(HANDY_STATE_RECOVERY_KEY)]); }
+        catch { throw new HandyStateStorageError('read'); }
+        let current: HandyState;
+        try { current = (await read()).state; }
+        catch (error) {
+          if (!(error instanceof HandyStateStorageError) || error.operation !== 'read') throw error;
+          // An IO error is not permission to discard a valid current record.
+          // Only explicitly unreadable/corrupt structures may be replaced after
+          // their exact raw bytes have been captured for the archive below.
+          let validCurrent = false;
+          try { if (primary !== null) { decode(JSON.parse(primary)); validCurrent = true; } } catch { }
+          try { if (recovery !== null) { decode(JSON.parse(recovery).state); validCurrent = true; } } catch { }
+          if (validCurrent) throw error;
+          current = {presets: []};
+        }
+        const state = decode(withoutTheme(mergeRecoveredPresets(current, candidate)));
+        try { await storage.setItem(HANDY_STATE_BEFORE_RESTORE + makeId('snapshot'), JSON.stringify({primary, recovery, selected: candidate})); }
+        catch { throw new HandyStateStorageError('write'); }
+        await journal({version: 1, state, legacyBase: primary});
+        try { await storage.setItem(HANDY_STATE_KEY, JSON.stringify(state)); } catch { /* Committed recovery remains authoritative. */ }
+        initialized = true;
+        return state;
+      });
+    },
+  };
+}
+
+// Runtime preset writes never serialize theme preferences. The legacy engine
+// retains compatibility with old snapshots for migration and recovery only.
+export function createPresetRepository(storage: Storage) {
+  const repository = createHandyStateRepository(storage);
+  return {...repository,
+    async load() {
+      const state = await repository.load();
+      let raw: string | null;
+      try { raw = await storage.getItem(LEGACY_THEME_SEED_KEY); } catch { throw new HandyStateStorageError('read'); }
+      // Keep the old preference as a separate migration-only checkpoint until
+      // the preference vault can accept it. Preset edits may proceed while the
+      // vault is unavailable without destroying the only legacy theme value.
+      if (raw === null && state.theme) {
+        try { await storage.setItem(LEGACY_THEME_SEED_KEY, state.theme); } catch { throw new HandyStateStorageError('write'); }
+      }
+      const seed = state.theme ?? raw;
+      return seed && ['psychedelic', 'midnight', 'paper'].includes(seed) ? {...state, theme: seed as NonNullable<HandyState['theme']>} : state;
+    },
+    update: (mutate: StateMutation) => repository.update(state => withoutTheme(mutate(state))),
   };
 }

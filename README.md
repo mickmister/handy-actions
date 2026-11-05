@@ -4,16 +4,22 @@ Local presets with QR, web, deep-link, text-input, HTTP and VD agent actions for
 
 ## Saved presets and settings
 
-Presets, action order, theme and surface/workspace preferences are saved together.
+Presets, action order and surface/workspace preferences are saved together.
 `handy-actions/state-recovery/v1` holds a validated commit snapshot before the
 backward-compatible `handy-actions/state/v1` mirror is updated. A missing or
 damaged primary can load from the recovery snapshot; legacy data is migrated
 without changing IDs, payloads or order. Interrupted mirror writes cannot roll
 back the committed snapshot, and serialized functional edits preserve concurrent
-changes to other settings.
+changes to other settings. Theme preferences use an independent SecureStore
+service (`handy-actions-theme-v1`) and key (`handy-actions.theme.v1`), accessible
+after first unlock on this device. Changing a theme performs no preset reads or
+writes, including when preset loading fails. Legacy themes migrate only if no
+independent choice exists; a separate migration checkpoint preserves the old
+choice if the preference vault is temporarily unavailable during preset edits.
 
-A failed/unreadable cold-start load is shown as an error, not a reset. Editing and
-surface rebuilds wait for a successful load. The last confirmed in-memory state
+A failed/unreadable cold-start load is shown as an error, not a reset. Preset editing
+waits for a successful preset load; surface rebuilds wait for both presets and
+theme preferences. Theme selection remains available independently. The last confirmed in-memory state
 is retained, foregrounding retries an unsuccessful load, and **Retry loading saved
 settings** is available on the home screen and in Settings. Present-but-invalid
 data is never normalized into empty defaults. Recovery requires at least one
@@ -34,6 +40,18 @@ writes no longer populate the read cache with uncommitted values. The actual
 Foundation read helper is tested in `test/native/PersistentSettingsTests.m` during
 the iOS build. This fix requires a new native installation; finding the file on
 the affected phone still needs device confirmation.
+
+**Settings → Saved settings status → Look for previous presets** offers an explicit,
+read-only scan of those two known settings files, even if the current manifest
+contains a valid empty inline value after a theme-only save. Review the candidate
+preset names/counts before choosing **Restore these presets**. Restoration adds
+missing presets/actions by stable ID, preserves current edits and the independent
+theme, and archives the current raw primary/journal records before committing.
+An archive failure prevents restoration. No surviving valid snapshot means there
+is nothing to restore. Install updates over the existing app rather than
+uninstalling it, so remaining files are preserved. Native scanner fixtures run
+during the iOS build; theme isolation and restore tests are in
+`test/themeSeparation.test.ts`.
 
 **Settings → About** always shows the native installed build number plus the
 running embedded/OTA bundle and runtime identifiers. Release workflows generate

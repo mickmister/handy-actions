@@ -2,7 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { HandyState } from '../src/core/handyModel.ts';
 import { createHandyStateRepository, HANDY_STATE_KEY, HANDY_STATE_RECOVERY_KEY } from '../src/core/handyStateRepository.ts';
-import { createHandyStateSession } from '../src/core/handyStateSession.ts';
+import { createHandyStateSession as createSession } from '../src/core/handyStateSession.ts';
+import { createThemeRepository } from '../src/core/themeRepository.ts';
+
+function preferenceVault() {
+  const values = new Map<string,string>();
+  return {async getItem(key:string){return values.get(key) ?? null;},async setItem(key:string,value:string){values.set(key,value);}};
+}
+function createHandyStateSession(repository: Parameters<typeof createSession>[0], vault = preferenceVault()) {
+  return createSession(repository, createThemeRepository(vault));
+}
 
 const saved: HandyState = {
   theme:'paper',
@@ -78,7 +87,8 @@ test('failed reload preserves last confirmed state and storage error despite sur
   const io=storage();const session=createHandyStateSession(createHandyStateRepository(io));
   await session.load();const confirmed=session.getSnapshot().state;
   io.failReads=true;await session.load();
-  assert.equal(session.getSnapshot().state,confirmed);
+  assert.deepEqual(session.getSnapshot().state,confirmed);
+  assert.equal(session.getSnapshot().state.presets,confirmed.presets);
   assert.equal(session.getSnapshot().loaded,false);
   const message=session.getSnapshot().message;
   session.setMessage('Lock Screen refreshed.');
@@ -101,14 +111,15 @@ test('malformed present data never normalizes into a new empty installation', as
 });
 
 test('functional concurrent theme/action/settings saves merge against latest committed state', async () => {
-  const io=storage();const session=createHandyStateSession(createHandyStateRepository(io));await session.load();
+  const io=storage();const vault=preferenceVault();const session=createHandyStateSession(createHandyStateRepository(io),vault);await session.load();
   const results=await Promise.all([
-    session.update(state=>({...state,theme:'midnight'}),'Theme'),
+    session.updateTheme('midnight','Theme'),
     session.update(state=>({...state,presets:state.presets.map(p=>({...p,actions:[...p.actions,{id:'added',name:'New action',payload:{type:'notes'}}]}))}),'Action'),
     session.update(state=>({...state,recentWorkspaces:{enabled:false,originId:'different'}}),'Workspaces'),
   ]);
   assert.ok(results.every(result=>result.ok));
-  const restored=await createHandyStateRepository(io).load();
+  const restarted=createHandyStateSession(createHandyStateRepository(io),vault);await restarted.load();
+  const restored=restarted.getSnapshot().state;
   assert.equal(restored.theme,'midnight');
   assert.deepEqual(restored.presets[0].actions.map(a=>a.id),['agent','note','added']);
   assert.deepEqual(restored.presets[0].actions.slice(0,2),saved.presets[0].actions);
@@ -169,7 +180,7 @@ test('native recovery of an orphaned primary restores settings even after an ear
   const repository=createHandyStateRepository(io);
   assert.deepEqual(await repository.load(),saved);
   assert.equal(repository.getDiagnostics().source,'primary');
-  assert.deepEqual(repository.getDiagnostics().primary,{status:'valid',presets:1,actions:2,theme:'paper'});
+  assert.deepEqual(repository.getDiagnostics().primary,{status:'valid',presets:1,actions:2,legacyTheme:'paper'});
   io.values.delete(HANDY_STATE_KEY);
   assert.deepEqual(await createHandyStateRepository(io).load(),saved);
 });
@@ -180,7 +191,7 @@ test('cached settings diagnostics do not perform reads/writes or expose private 
   await repository.load();const writes=io.writes.length;const beforeReads=reads;
   const diagnostics=repository.getDiagnostics();
   assert.equal(diagnostics.primary?.presets,1);
-  assert.equal(diagnostics.primary?.theme,'paper');
+  assert.equal(diagnostics.primary?.legacyTheme,'paper');
   assert.equal(JSON.stringify(diagnostics).includes('Keep this prefix'),false);
   assert.equal(JSON.stringify(diagnostics).includes('handyactions://'),false);
   assert.equal(JSON.stringify(diagnostics).includes('vd-origin'),false);
