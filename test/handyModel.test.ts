@@ -249,7 +249,7 @@ test('text-input actions round trip through storage, export and notification sna
 
 test('legacy presets retain surface defaults and widget selection uses an enabled nonempty preset', () => {
   const legacy = importHandyState('{"presets":[]}');
-  assert.deepEqual(surfaceSettings(legacy), { liveActivities: true, lockScreenWidgets: false, notifications: true });
+  assert.deepEqual(surfaceSettings(legacy), { liveActivities: true, lockScreenWidgets: false, notifications: false });
   const state: HandyState = {
     surfaces: { liveActivities: false, lockScreenWidgets: true, notifications: false, widgetPresetId: 'second' },
     presets: [

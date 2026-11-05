@@ -42,7 +42,7 @@ export type SurfaceSettings = {
 };
 
 export function surfaceSettings(state: HandyState): SurfaceSettings {
-  return { liveActivities: true, lockScreenWidgets: false, notifications: true, ...state.surfaces };
+  return { liveActivities: true, lockScreenWidgets: false, notifications: false, ...state.surfaces };
 }
 
 export type HandyAction = {
@@ -138,7 +138,7 @@ export function normalizeHandyState(value: unknown): HandyState {
     ...(isRecord(value.surfaces) ? { surfaces: {
       liveActivities: value.surfaces.liveActivities !== false,
       lockScreenWidgets: value.surfaces.lockScreenWidgets === true,
-      notifications: value.surfaces.notifications !== false,
+      notifications: value.surfaces.notifications === true,
       ...(typeof value.surfaces.widgetPresetId === 'string' ? { widgetPresetId: value.surfaces.widgetPresetId } : {}),
     } } : {}),
     presets: value.presets.map((rawPreset): HandyPreset => {
