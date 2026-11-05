@@ -160,6 +160,36 @@ test('damaged journal recovers valid primary without replacing the damaged bytes
   assert.equal((await createHandyStateRepository(io).load()).theme,'midnight');
 });
 
+test('native recovery of an orphaned primary restores settings even after an earlier launch created an empty journal', async () => {
+  const io=storage();io.values.clear();
+  await createHandyStateRepository(io).load();
+  // An older library lost the primary index entry. The fixed native getter can
+  // now return the intact original file despite the empty fallback from before.
+  io.values.set(HANDY_STATE_KEY,JSON.stringify(saved));
+  const repository=createHandyStateRepository(io);
+  assert.deepEqual(await repository.load(),saved);
+  assert.equal(repository.getDiagnostics().source,'primary');
+  assert.deepEqual(repository.getDiagnostics().primary,{status:'valid',presets:1,actions:2,theme:'paper'});
+  io.values.delete(HANDY_STATE_KEY);
+  assert.deepEqual(await createHandyStateRepository(io).load(),saved);
+});
+
+test('cached settings diagnostics do not perform reads/writes or expose private preset contents', async () => {
+  const io=storage();let reads=0;
+  const repository=createHandyStateRepository({...io,async getItem(key:string){reads++;return io.getItem(key);}});
+  await repository.load();const writes=io.writes.length;const beforeReads=reads;
+  const diagnostics=repository.getDiagnostics();
+  assert.equal(diagnostics.primary?.presets,1);
+  assert.equal(diagnostics.primary?.theme,'paper');
+  assert.equal(JSON.stringify(diagnostics).includes('Keep this prefix'),false);
+  assert.equal(JSON.stringify(diagnostics).includes('handyactions://'),false);
+  assert.equal(JSON.stringify(diagnostics).includes('vd-origin'),false);
+  diagnostics.primary!.presets=999;
+  assert.equal(repository.getDiagnostics().primary?.presets,1);
+  assert.equal(reads,beforeReads);
+  assert.equal(io.writes.length,writes);
+});
+
 test('migration write failures retain primary, and only genuinely absent records initialize defaults', async () => {
   const io=storage();io.failWrite=HANDY_STATE_RECOVERY_KEY;
   const repository=createHandyStateRepository(io);

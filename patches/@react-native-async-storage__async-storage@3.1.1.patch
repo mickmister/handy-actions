@@ -1,0 +1,166 @@
+diff --git a/apple/legacy_storage/HandyPersistentSettings.h b/apple/legacy_storage/HandyPersistentSettings.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..e1e5d11b383e19b280defcc062d79145ec37ff59
+--- /dev/null
++++ b/apple/legacy_storage/HandyPersistentSettings.h
+@@ -0,0 +1,15 @@
++#import <Foundation/Foundation.h>
++
++typedef NSString *_Nullable (^HandyLegacyFileReader)(NSString *path, NSString *key,
++                                                     NSDictionary *_Nullable *_Nullable errorOut);
++
++// Attempt the read directly: fileExistsAtPath can report false when a protected
++// file is inaccessible. Only an actual no-such-file error means missing data.
++FOUNDATION_EXPORT NSString *_Nullable HandyReadPersistentFile(
++    NSString *path, NSError *_Nullable *_Nullable errorOut);
++
++// Foundation-only so the actual production read path can be regression-tested
++// without React. Recovery is scoped to settings, never delivery/receipt records.
++FOUNDATION_EXPORT NSString *_Nullable HandyReadLegacyValue(
++    NSString *key, NSMutableDictionary *manifest, NSCache *cache, NSString *filePath,
++    NSDictionary *_Nullable *_Nullable errorOut, HandyLegacyFileReader readFile);
+diff --git a/apple/legacy_storage/HandyPersistentSettings.m b/apple/legacy_storage/HandyPersistentSettings.m
+new file mode 100644
+index 0000000000000000000000000000000000000000..e144a8d0165518f203e4e8b2cfda0cf24285f6df
+--- /dev/null
++++ b/apple/legacy_storage/HandyPersistentSettings.m
+@@ -0,0 +1,52 @@
++#import "HandyPersistentSettings.h"
++
++NSString *HandyReadPersistentFile(NSString *path, NSError **errorOut) {
++  if (errorOut) *errorOut = nil;
++  NSError *error = nil;
++  NSStringEncoding encoding = NSUTF8StringEncoding;
++  NSString *value = [NSString stringWithContentsOfFile:path usedEncoding:&encoding error:&error];
++  if (!value) {
++    BOOL missing = [error.domain isEqualToString:NSCocoaErrorDomain] &&
++      (error.code == NSFileReadNoSuchFileError || error.code == NSFileNoSuchFileError);
++    if (!missing && errorOut) *errorOut = error ?: [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileReadUnknownError userInfo:nil];
++    return nil;
++  }
++  if (encoding != NSUTF8StringEncoding) {
++    if (errorOut) *errorOut = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileReadInapplicableStringEncodingError userInfo:nil];
++    return nil;
++  }
++  return value;
++}
++
++NSString *HandyReadLegacyValue(NSString *key, NSMutableDictionary *manifest,
++                             NSCache *cache, NSString *filePath,
++                             NSDictionary **errorOut, HandyLegacyFileReader readFile) {
++  id entry = manifest[key];
++  if ([entry isKindOfClass:NSString.class]) return entry;
++  BOOL recoverSettings = [key isEqualToString:@"handy-actions/state/v1"] ||
++                        [key isEqualToString:@"handy-actions/state-recovery/v1"];
++  if (!entry && !recoverSettings) return nil;
++  if (entry && entry != NSNull.null) {
++    if (errorOut) *errorOut = @{@"message": @"Invalid stored value metadata.", @"key": key};
++    return nil;
++  }
++  // Do not trust a cache-only value when the manifest lacks this key. Recovery
++  // must find the original file, rather than reviving a stale cached value.
++  NSString *value = entry ? [cache objectForKey:key] : nil;
++  if (value) return value;
++  NSDictionary *readError = nil;
++  value = readFile(filePath, key, &readError);
++  if (readError) {
++    // A protected/unreadable file is NOT missing. Removing this mapping would
++    // let an unrelated automatic write persist the omission after a cold start.
++    if (errorOut) *errorOut = readError;
++    return nil;
++  }
++  if (value) {
++    manifest[key] = NSNull.null;
++    [cache setObject:value forKey:key cost:value.length];
++  } else if (entry) {
++    [manifest removeObjectForKey:key]; // Confirmed absent, with no read error.
++  }
++  return value;
++}
+diff --git a/apple/legacy_storage/RNCAsyncStorage.mm b/apple/legacy_storage/RNCAsyncStorage.mm
+index d9f3dc82728327b42dbdcc0c8aa222cc3ce5b01f..44d6529f60f756fc109a8f55e7fef38341b8ebe4 100644
+--- a/apple/legacy_storage/RNCAsyncStorage.mm
++++ b/apple/legacy_storage/RNCAsyncStorage.mm
+@@ -8,1 +8,2 @@
+ #import "RNCAsyncStorage.h"
++#import "HandyPersistentSettings.h"
+@@ -82,29 +83,9 @@ static NSArray<NSDictionary *> *RCTMakeErrors(NSArray<id<NSObject>> *results)
+ static NSString *RCTReadFile(NSString *filePath, NSString *key, NSDictionary **errorOut)
+ {
+-    if ([[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+-        NSError *error;
+-        NSStringEncoding encoding;
+-        NSString *entryString = [NSString stringWithContentsOfFile:filePath
+-                                                      usedEncoding:&encoding
+-                                                             error:&error];
+-        NSDictionary *extraData = @{@"key": RCTNullIfNil(key)};
+-
+-        if (error) {
+-            if (errorOut) {
+-                *errorOut = RCTMakeError(@"Failed to read storage file.", error, extraData);
+-            }
+-            return nil;
+-        }
+-
+-        if (encoding != NSUTF8StringEncoding) {
+-            if (errorOut) {
+-                *errorOut =
+-                    RCTMakeError(@"Incorrect encoding of storage file: ", @(encoding), extraData);
+-            }
+-            return nil;
+-        }
+-        return entryString;
++    NSError *error = nil;
++    NSString *value = HandyReadPersistentFile(filePath, &error);
++    if (error && errorOut) {
++        *errorOut = RCTMakeError(@"Failed to read storage file.", error, @{@"key": RCTNullIfNil(key)});
+     }
+-
+-    return nil;
++    return value;
+ }
+@@ -598,20 +579,8 @@ RCTStorageDirectoryMigrationCheck(NSString *fromStorageDirectory,
+ - (NSString *)_getValueForKey:(NSString *)key errorOut:(NSDictionary *__autoreleasing *)errorOut
+ {
+-    NSString *value =
+-        _manifest[key];  // nil means missing, null means there may be a data file, else: NSString
+-    if (value == (id)kCFNull) {
+-        value = [RCTGetCache() objectForKey:key];
+-        if (!value) {
+-            NSString *filePath = [self _filePathForKey:key];
+-            value = RCTReadFile(filePath, key, errorOut);
+-            if (value) {
+-                [RCTGetCache() setObject:value forKey:key cost:value.length];
+-            } else {
+-                // file does not exist after all, so remove from manifest (no need to save
+-                // manifest immediately though, as cost of checking again next time is negligible)
+-                [_manifest removeObjectForKey:key];
+-            }
+-        }
+-    }
+-    return value;
++    return HandyReadLegacyValue(key, _manifest, RCTGetCache(), [self _filePathForKey:key],
++                                errorOut, ^NSString *(NSString *path, NSString *fileKey,
++                                                     NSDictionary **readError) {
++        return RCTReadFile(path, fileKey, readError);
++    });
+ }
+@@ -641,12 +610,14 @@ RCTStorageDirectoryMigrationCheck(NSString *fromStorageDirectory,
+         return nil;
+     }
+     [value writeToFile:filePath atomically:YES encoding:NSUTF8StringEncoding error:&error];
+-    [RCTGetCache() setObject:value forKey:key cost:value.length];
+     if (error) {
+         errorOut = RCTMakeError(@"Failed to write value.", error, @{@"key": key});
+-    } else if (_manifest[key] != (id)kCFNull) {
+-        *changedManifest = YES;
+-        _manifest[key] = (id)kCFNull;
++    } else {
++        [RCTGetCache() setObject:value forKey:key cost:value.length];
++        if (_manifest[key] != (id)kCFNull) {
++            *changedManifest = YES;
++            _manifest[key] = (id)kCFNull;
++        }
+     }
+     return errorOut;
+ }

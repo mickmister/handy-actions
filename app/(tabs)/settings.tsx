@@ -10,6 +10,10 @@ import { useHandyStateContext } from '@/src/hooks/HandyStateProvider';
 import { enabledPresets, surfaceSettings, type SurfaceSettings } from '@/src/core/handyModel';
 import { themeOptions } from '@/src/core/handyThemes';
 import { origins } from '@/src/core/origins';
+import Constants from 'expo-constants';
+import * as Updates from 'expo-updates';
+import { releaseMetadata } from '@/src/core/releaseMetadata';
+import { handyStateRepository } from '@/src/core/handyStore';
 
 export default function SettingsScreen() {
   const styles = useThemeStyles(createStyles);
@@ -91,9 +95,22 @@ export default function SettingsScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>About</Text>
-        <Text selectable style={styles.copy}>Commit: {process.env.EXPO_PUBLIC_COMMIT_HASH || 'Unknown'}</Text>
-        <Text selectable style={styles.copy}>{process.env.EXPO_PUBLIC_COMMIT_MESSAGE || 'Commit message unavailable'}</Text>
+        <Text selectable style={styles.copy}>Installed build: {Constants.nativeBuildVersion ?? 'Development'}</Text>
+        <Text selectable style={styles.copy}>App version: {Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? 'Development'}</Text>
+        <Text selectable style={styles.copy}>Commit: {releaseMetadata.commit || process.env.EXPO_PUBLIC_COMMIT_HASH || 'Not recorded'}</Text>
+        {releaseMetadata.message || process.env.EXPO_PUBLIC_COMMIT_MESSAGE ? <Text selectable style={styles.copy}>{releaseMetadata.message || process.env.EXPO_PUBLIC_COMMIT_MESSAGE}</Text> : null}
+        <Text selectable style={styles.copy}>Running bundle: {!Updates.isEnabled ? 'Development' : Updates.isEmbeddedLaunch ? 'Included with installed build' : `OTA ${Updates.updateId ?? 'unknown'}`}</Text>
+        {Updates.isEmergencyLaunch ? <Text style={styles.copy}>Update recovery launch: the downloaded update did not launch normally.</Text> : null}
+        <Text selectable style={styles.copy}>Update channel: {Updates.channel ?? 'Development'}</Text>
+        <Text selectable style={styles.copy}>Runtime: {Updates.runtimeVersion ?? 'Development'}</Text>
         {handy.storageError ? <><Text accessibilityLiveRegion="polite" style={styles.copy}>{handy.storageError}</Text><Pressable style={styles.secondaryButton} disabled={handy.loading} onPress={() => void handy.retryLoad()}><Text style={styles.secondaryButtonText}>{handy.loading ? 'Loading saved settings…' : 'Retry loading saved settings'}</Text></Pressable></> : null}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Saved settings status</Text>
+        <Text style={styles.copy}>Last load result, record counts and theme. No preset content or credentials are shown.</Text>
+        <Text selectable style={styles.codeBlock}>{JSON.stringify(handyStateRepository.getDiagnostics(), null, 2)}</Text>
+        <Pressable style={styles.secondaryButton} disabled={handy.loading} onPress={() => void handy.retryLoad()}><Text style={styles.secondaryButtonText}>{handy.loading ? 'Loading…' : 'Reload saved settings'}</Text></Pressable>
       </View>
 
       <View style={styles.card}>

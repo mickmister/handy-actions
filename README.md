@@ -21,6 +21,27 @@ valid saved copy; previously overwritten data cannot be reconstructed from a
 missing record. Regression tests cover cold starts, read/write failures, recovery,
 legacy compatibility and concurrent edits in `test/handyStatePersistence.test.ts`.
 
+The pinned AsyncStorage native patch attempts file reads directly and treats
+unreadable files as errors rather than assuming they are missing. It also
+preserves a file's manifest entry on a read error. Previously the legacy getter
+could discard that entry and a later
+automatic write to another key could persist the omission, without a settings
+save. Only the two known settings keys may recover their original hashed value
+files when the manifest entry is missing. Existing inline values, including an
+intentional empty settings state, take precedence. Recovery does not probe or
+revive delivery receipts, pending sends, or unrelated deleted keys. Failed file
+writes no longer populate the read cache with uncommitted values. The actual
+Foundation read helper is tested in `test/native/PersistentSettingsTests.m` during
+the iOS build. This fix requires a new native installation; finding the file on
+the affected phone still needs device confirmation.
+
+**Settings → About** always shows the native installed build number plus the
+running embedded/OTA bundle and runtime identifiers. Release workflows generate
+`releaseMetadata.ts` before uploading source for both native builds and updates,
+so native builds do not depend on environment variables reaching the remote
+bundler. **Saved settings status** shows cached load results, record counts and
+theme without reading storage again or exposing preset content/credentials.
+
 ## Lock-screen comparison
 
 In **Settings → Lock-screen experiments**, independently enable **Live Activities**, **Lock Screen Widgets**, and **Preset notification panels**. Live Activities and widgets can be enabled together. Live Activities are on by default; widgets are opt-in. Native text-input notifications are available even when preset notification panels are off.

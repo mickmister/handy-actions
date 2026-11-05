@@ -3,4 +3,5 @@ allowBuilds:
   protobufjs: false
 patchedDependencies:
   '@notifee/react-native@9.1.8': patches/@notifee__react-native@9.1.8.patch
+  '@react-native-async-storage/async-storage@3.1.1': patches/@react-native-async-storage__async-storage@3.1.1.patch
   expo-widgets@57.0.22: patches/expo-widgets@57.0.22.patch

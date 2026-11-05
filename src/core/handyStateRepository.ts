@@ -5,6 +5,16 @@ export const HANDY_STATE_RECOVERY_KEY = 'handy-actions/state-recovery/v1';
 type Storage = { getItem(key: string): Promise<string | null>; setItem(key: string, value: string): Promise<void> };
 type Journal = { version: 1; state: HandyState; legacyBase: string | null };
 export type StateMutation = (current: HandyState) => HandyState;
+type RecordDiagnostic = {status: 'missing' | 'valid' | 'invalid'; presets?: number; actions?: number; theme?: string};
+export type HandyStateDiagnostics = {
+  checkedAt?: string;
+  primary?: RecordDiagnostic;
+  recovery?: RecordDiagnostic;
+  source?: 'primary' | 'recovery' | 'new-empty' | 'read-error';
+};
+function diagnostic(raw: string | null, state: HandyState | undefined): RecordDiagnostic {
+  return state ? {status: 'valid', presets: state.presets.length, actions: state.presets.reduce((total, preset) => total + preset.actions.length, 0), theme: state.theme ?? 'psychedelic'} : {status: raw === null ? 'missing' : 'invalid'};
+}
 
 export class HandyStateStorageError extends Error {
   readonly operation: 'read' | 'write' | 'uninitialized';
@@ -28,6 +38,7 @@ const same = (a: HandyState, b: HandyState) => JSON.stringify(a) === JSON.string
 export function createHandyStateRepository(storage: Storage) {
   let queue: Promise<unknown> = Promise.resolve();
   let initialized = false;
+  let diagnostics: HandyStateDiagnostics = {};
   function serial<T>(operation: () => Promise<T>): Promise<T> {
     const result = queue.then(operation);
     queue = result.catch(() => {});
@@ -41,7 +52,7 @@ export function createHandyStateRepository(storage: Storage) {
     let primary: string | null;
     let recovery: string | null;
     try { [primary, recovery] = await Promise.all([storage.getItem(HANDY_STATE_KEY), storage.getItem(HANDY_STATE_RECOVERY_KEY)]); }
-    catch { throw new HandyStateStorageError('read'); }
+    catch { diagnostics = {checkedAt: new Date().toISOString(), source: 'read-error'}; throw new HandyStateStorageError('read'); }
     let legacy: HandyState | undefined;
     let saved: Journal | undefined;
     if (primary !== null) {
@@ -55,17 +66,21 @@ export function createHandyStateRepository(storage: Storage) {
         }
       } catch { /* A valid legacy copy can still recover a damaged journal. */ }
     }
+    diagnostics = {checkedAt: new Date().toISOString(), primary: diagnostic(primary, legacy), recovery: diagnostic(recovery, saved?.state)};
     if (saved) {
       // Recognize edits made by an older app using the legacy key. The exact
       // pre-commit legacy value distinguishes those from an interrupted mirror
       // write, even when multiple consecutive mirror writes have failed.
       if (legacy && !same(legacy, saved.state) && primary !== saved.legacyBase) {
+        diagnostics.source = 'primary';
         await journal({version: 1, state: legacy, legacyBase: primary});
         return {state: legacy, primary};
       }
+      diagnostics.source = 'recovery';
       return {state: saved.state, primary};
     }
     if (legacy) {
+      diagnostics.source = 'primary';
       if (recovery === null) await journal({version: 1, state: legacy, legacyBase: primary});
       return {state: legacy, primary};
     }
@@ -73,10 +88,14 @@ export function createHandyStateRepository(storage: Storage) {
     // data is an error, never permission to overwrite it with an empty state.
     if (primary !== null || recovery !== null) throw new HandyStateStorageError('read');
     const state = defaultHandyState();
+    diagnostics.source = 'new-empty';
     await journal({version: 1, state, legacyBase: null});
     return {state, primary};
   }
   return {
+    // Cached metadata from the actual load, not another storage read or a write.
+    // No note text, action names, URLs, prompts or credentials are exposed.
+    getDiagnostics: (): HandyStateDiagnostics => JSON.parse(JSON.stringify(diagnostics)),
     load(): Promise<HandyState> {
       return serial(async () => {
         try { const {state} = await read(); initialized = true; return state; }
